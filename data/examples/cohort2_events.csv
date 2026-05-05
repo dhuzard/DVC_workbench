@@ -1,0 +1,3 @@
+group,day,hour,minute,relativeTime,timestamp,cage,rack,position,event
+C57,0,2,12,7949,2024-07-12T10:12:29.308+0200,C57_2,23002940A,G9,REMOVED
+C57,0,2,12,7953,2024-07-12T10:12:33.284+0200,C57_2,23002940A,G9,INSERTED

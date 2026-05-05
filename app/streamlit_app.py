@@ -1,0 +1,1671 @@
+"""
+DVC Behavioral Preprocessing Workbench – Streamlit GUI.
+
+Run with:  streamlit run app/streamlit_app.py
+"""
+
+from __future__ import annotations
+
+import io
+import sys
+import tempfile
+from copy import deepcopy
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import streamlit as st
+
+from components.metadata_tables import group_column_config, subject_column_config
+from components.workflow import (
+    render_contextual_help,
+    render_data_flow_diagram,
+    render_output_glossary,
+    render_progress_stepper,
+)
+
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
+_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(_ROOT / "src"))
+
+from dvc_behavior import (  # noqa: E402
+    aggregation,
+    alignment,
+    analysis,
+    baseline,
+    config as cfg,
+    events as ev_mod,
+    exclusions,
+    export as exp_mod,
+    light_dark,
+    metadata as meta_mod,
+    parsing,
+    qc,
+    reporting,
+    schemas,
+)
+from dvc_behavior.io import list_example_files  # noqa: E402
+
+_EXAMPLES_DIR = _ROOT / "data" / "examples"
+
+# ---------------------------------------------------------------------------
+# Session state initialisation
+# ---------------------------------------------------------------------------
+
+def _init_state() -> None:
+    defaults: dict[str, Any] = {
+        # raw file bytes: list of (name, bytes)
+        "metric_files": [],
+        "event_files": [],
+        # parsed dataframes
+        "long_df": None,
+        "event_df": None,
+        # metadata tables
+        "study_meta": cfg.STUDY_METADATA_DEFAULTS.copy(),
+        "subject_meta": None,
+        "group_meta": None,
+        "treatment_schedule": pd.DataFrame(
+            columns=["animal_id", "event_type", "timestamp", "dose", "unit", "route", "notes"]
+        ),
+        "facility_events": pd.DataFrame(
+            columns=["timestamp_start", "timestamp_end", "event_type", "affected_groups", "notes"]
+        ),
+        "baseline_overrides": pd.DataFrame(columns=["subject_id", "metric_name", "baseline_value", "notes"]),
+        # processing config
+        "timezone": cfg.DEFAULT_TIMEZONE,
+        "light_on": cfg.DEFAULT_LIGHT_ON,
+        "light_off": cfg.DEFAULT_LIGHT_OFF,
+        "exclusion_rules": deepcopy(cfg.DEFAULT_EXCLUSION_RULES),
+        "alignment_cfg": deepcopy(cfg.DEFAULT_ALIGNMENT),
+        "baseline_cfg": deepcopy(cfg.DEFAULT_BASELINE),
+        "aggregation_bin": None,
+        # results
+        "processed_df": None,
+        "exclusion_log": None,
+        "baseline_summary": None,
+        "all_warnings": [],
+        "schema_validation_enabled": False,
+        "analysis_tables": {},
+        "analysis_figures": {},
+        "analysis_warning": "",
+        # pipeline timestamp for cache-busting display
+        "pipeline_run_ts": None,
+        "export_zip_ready": False,
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+# ---------------------------------------------------------------------------
+# Helper: parse all uploaded metric & event files
+# ---------------------------------------------------------------------------
+
+@st.cache_data(show_spinner=False)
+def _cached_load_metric_csv(name: str, data: bytes) -> tuple[pd.DataFrame, list[str]]:
+    return parsing.load_metric_csv(io.BytesIO(data), source_file=name)
+
+
+@st.cache_data(show_spinner=False)
+def _cached_parse_event_csv(name: str, data: bytes) -> tuple[pd.DataFrame, list[str]]:
+    return ev_mod.parse_event_csv(io.BytesIO(data), source_file=name)
+
+
+def _parse_all_files() -> None:
+    """Re-parse all metric and event files and store in session_state."""
+    warns: list[str] = []
+    total_bytes = sum(len(data) for _, data in st.session_state.metric_files + st.session_state.event_files)
+    progress = st.progress(0, text="Parsing uploaded files...") if total_bytes > 1_000_000 else None
+    total_files = len(st.session_state.metric_files) + len(st.session_state.event_files)
+    parsed_files = 0
+
+    # ---- metric files ----
+    long_dfs: list[pd.DataFrame] = []
+    for name, data in st.session_state.metric_files:
+        df, w = _cached_load_metric_csv(name, data)
+        warns.extend(w)
+        if not df.empty:
+            long_dfs.append(df)
+        parsed_files += 1
+        if progress and total_files:
+            progress.progress(parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files")
+
+    st.session_state.long_df = parsing.combine_long_dfs(long_dfs) if long_dfs else None
+    warns.extend(schemas.validate_dataframe(
+        st.session_state.long_df if st.session_state.long_df is not None else pd.DataFrame(),
+        "long_df",
+        enabled=bool(st.session_state.schema_validation_enabled),
+    ))
+
+    # ---- event files ----
+    ev_dfs: list[pd.DataFrame] = []
+    for name, data in st.session_state.event_files:
+        df, w = _cached_parse_event_csv(name, data)
+        warns.extend(w)
+        if not df.empty:
+            ev_dfs.append(df)
+        parsed_files += 1
+        if progress and total_files:
+            progress.progress(parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files")
+
+    st.session_state.event_df = ev_mod.combine_event_dfs(ev_dfs) if ev_dfs else None
+    warns.extend(schemas.validate_dataframe(
+        st.session_state.event_df if st.session_state.event_df is not None else pd.DataFrame(),
+        "event_df",
+        enabled=bool(st.session_state.schema_validation_enabled),
+    ))
+    if progress:
+        progress.empty()
+
+    # Build metadata templates from detected subjects/groups
+    if st.session_state.long_df is not None:
+        long_df = st.session_state.long_df
+        # Only rebuild if not already defined (avoid overwriting user edits)
+        if st.session_state.subject_meta is None:
+            st.session_state.subject_meta = meta_mod.build_subject_metadata_template(long_df)
+        if st.session_state.group_meta is None:
+            st.session_state.group_meta = meta_mod.build_group_metadata_template(long_df)
+
+    st.session_state.all_warnings = warns
+    st.session_state.processed_df = None  # invalidate downstream results
+    st.session_state.exclusion_log = None
+    st.session_state.baseline_summary = None
+    st.session_state.export_zip_ready = False
+
+
+def _facility_events_as_event_df(facility_events: pd.DataFrame | None) -> pd.DataFrame:
+    """Convert the facility event editor table into exclusion-compatible rows."""
+    if facility_events is None or facility_events.empty:
+        return pd.DataFrame()
+    rows: list[dict[str, Any]] = []
+    for _, row in facility_events.iterrows():
+        start = pd.to_datetime(row.get("timestamp_start"), utc=True, errors="coerce")
+        end = pd.to_datetime(row.get("timestamp_end"), utc=True, errors="coerce")
+        if pd.isna(start):
+            continue
+        rows.append(
+            {
+                "source_file": "manual_facility_events",
+                "group_id": str(row.get("affected_groups", "")).strip() or pd.NA,
+                "subject_id": pd.NA,
+                "event_scope": "facility" if not str(row.get("affected_groups", "")).strip() else "group",
+                "event_type": "FACILITY_EVENT",
+                "timestamp": start,
+                "timestamp_utc": start,
+                "timestamp_end": end if not pd.isna(end) else start,
+                "timestamp_end_utc": end if not pd.isna(end) else start,
+                "timestamp_local": start,
+                "relative_time_seconds": pd.NA,
+                "rack": pd.NA,
+                "position": pd.NA,
+                "raw_event_label": row.get("event_type", "FACILITY_EVENT"),
+                "event_category": "facility",
+                "notes": row.get("notes", ""),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Full preprocessing pipeline
+# ---------------------------------------------------------------------------
+
+def _run_pipeline() -> None:
+    """
+    Execute the full pipeline on long_df and store results in session_state.
+
+    Steps:
+      1. Merge metadata
+      2. Localise timestamps + annotate light/dark
+      3. Apply exclusions
+      4. Align to event
+      5. Compute baseline
+      6. (optional) aggregate
+    """
+    long_df = st.session_state.long_df
+    if long_df is None or long_df.empty:
+        st.error("No parsed data found. Load files first.")
+        return
+
+    warns: list[str] = list(st.session_state.all_warnings)
+    df = long_df.copy()
+
+    # 1. Merge metadata
+    if st.session_state.subject_meta is not None:
+        df = meta_mod.merge_subject_metadata(df, st.session_state.subject_meta)
+    if st.session_state.group_meta is not None:
+        df = meta_mod.merge_group_metadata(df, st.session_state.group_meta)
+
+    tz = st.session_state.timezone
+    light_on = st.session_state.light_on
+    light_off = st.session_state.light_off
+
+    # 2. Localise + light/dark annotation
+    df, ld_warns = light_dark.add_light_dark_columns(df, tz, light_on, light_off)
+    warns.extend(ld_warns)
+
+    # 3. Exclusions
+    event_df = st.session_state.event_df
+    facility_df = _facility_events_as_event_df(st.session_state.facility_events)
+    if facility_df is not None and not facility_df.empty:
+        event_df = (
+            pd.concat([event_df, facility_df], ignore_index=True)
+            if event_df is not None and not event_df.empty
+            else facility_df
+        )
+    log_df = pd.DataFrame()
+    if event_df is not None and not event_df.empty:
+        # Localise event timestamps too
+        if "timestamp_utc" in event_df.columns:
+            try:
+                event_df = event_df.copy()
+                event_df["timestamp_local"] = event_df["timestamp_utc"].dt.tz_convert(tz)
+            except Exception:
+                pass
+
+        win_df = exclusions.compute_exclusion_windows(
+            event_df, st.session_state.exclusion_rules
+        )
+        df, log_df = exclusions.apply_exclusions(df, win_df)
+    else:
+        df["is_excluded"] = False
+        df["exclusion_reason"] = ""
+        df["flag_reason"] = ""
+
+    st.session_state.exclusion_log = log_df
+
+    # 4. Alignment
+    aln_cfg = st.session_state.alignment_cfg
+    event_type = aln_cfg.get("event_type")
+    fallback_ts = aln_cfg.get("fallback_timestamp")
+
+    if event_type:
+        df, aln_warns = alignment.align_to_event(
+            df,
+            event_df if event_df is not None else pd.DataFrame(),
+            event_type=event_type,
+            scope=aln_cfg.get("scope", "subject"),
+            fallback_timestamp=fallback_ts if fallback_ts else None,
+            alignment_label=aln_cfg.get("label", "J0"),
+        )
+        warns.extend(aln_warns)
+    elif fallback_ts:
+        df, aln_warns = alignment.align_to_manual_timestamp(
+            df, fallback_ts, alignment_label=aln_cfg.get("label", "J0")
+        )
+        warns.extend(aln_warns)
+    else:
+        warns.append(
+            "No alignment event or manual timestamp configured; "
+            "time_from_event columns will be absent."
+        )
+        for col in (
+            "alignment_event_type", "alignment_timestamp",
+            "time_from_event_seconds", "time_from_event_hours", "experimental_day"
+        ):
+            df[col] = None
+
+    # 5. Baseline
+    bsl_cfg = st.session_state.baseline_cfg
+    df, bsl_summary, bsl_warns = baseline.compute_baseline(
+        df,
+        start_hours=float(bsl_cfg.get("start_hours", -72)),
+        end_hours=float(bsl_cfg.get("end_hours", -24)),
+        method=bsl_cfg.get("method", "mean"),
+        exclude_excluded=bool(bsl_cfg.get("exclude_excluded", True)),
+        min_coverage=float(bsl_cfg.get("min_coverage", 0.7)),
+        impute_from_group_mean=bool(bsl_cfg.get("impute_from_group_mean", False)),
+        baseline_overrides=st.session_state.baseline_overrides,
+    )
+    warns.extend(bsl_warns)
+    st.session_state.baseline_summary = bsl_summary
+
+    # 6. (optional) aggregation
+    bin_s = st.session_state.aggregation_bin
+    if bin_s is not None:
+        df, agg_warns = aggregation.aggregate(df, bin_s)
+        warns.extend(agg_warns)
+
+    st.session_state.processed_df = df
+    warns.extend(schemas.validate_dataframe(
+        df,
+        "processed_df",
+        enabled=bool(st.session_state.schema_validation_enabled),
+    ))
+    st.session_state.all_warnings = warns
+    st.session_state.pipeline_run_ts = pd.Timestamp.now()
+    st.session_state.analysis_tables = {}
+    st.session_state.analysis_figures = {}
+    st.session_state.export_zip_ready = False
+
+
+# ---------------------------------------------------------------------------
+# UX scaffolding helpers
+# ---------------------------------------------------------------------------
+
+def _normalise_metadata_table(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
+    """Ensure edited/re-uploaded metadata retains expected columns, then keep extras."""
+    out = df.copy()
+    for col in columns:
+        if col not in out.columns:
+            out[col] = ""
+    ordered_cols = columns + [c for c in out.columns if c not in columns]
+    return out[ordered_cols].fillna("")
+
+
+def _workflow_steps() -> list[dict[str, str]]:
+    long_df = st.session_state.long_df
+    event_df = st.session_state.event_df
+    proc = st.session_state.processed_df
+    subject_meta = st.session_state.subject_meta
+    group_meta = st.session_state.group_meta
+    aln_cfg = st.session_state.alignment_cfg
+
+    has_metric = long_df is not None and not long_df.empty
+    has_events = event_df is not None and not event_df.empty
+    has_processed = proc is not None and not proc.empty
+    has_alignment_cfg = bool(aln_cfg.get("event_type") or aln_cfg.get("fallback_timestamp"))
+
+    meta_errors: list[str] = []
+    meta_warns: list[str] = []
+    if has_metric and subject_meta is not None:
+        meta_errors, meta_warns = meta_mod.validate_subject_metadata(subject_meta, long_df)
+
+    metadata_ready = has_metric
+    metadata_done = (
+        metadata_ready
+        and subject_meta is not None
+        and group_meta is not None
+        and not meta_errors
+    )
+
+    baseline_summary = st.session_state.baseline_summary
+    has_baseline = baseline_summary is not None and not baseline_summary.empty
+
+    def _status(done: bool, ready: bool) -> str:
+        if done:
+            return "done"
+        return "ready" if ready else "locked"
+
+    return [
+        {
+            "label": "1. Import",
+            "status": _status(has_metric, True),
+            "detail": f"{len(long_df):,} metric rows" if has_metric else "Load metric CSVs or examples.",
+        },
+        {
+            "label": "2. Validate",
+            "status": _status(has_metric, has_metric),
+            "detail": "Review detected subjects, groups, metrics, and warnings.",
+        },
+        {
+            "label": "3. Metadata",
+            "status": _status(metadata_done, metadata_ready),
+            "detail": (
+                "Metadata has validation errors."
+                if meta_errors
+                else (
+                    f"{len(meta_warns)} warning(s) remain."
+                    if meta_warns
+                    else "Study, subject, and group tables are ready."
+                    if metadata_done
+                    else "Complete subject and group metadata."
+                )
+            ),
+        },
+        {
+            "label": "4. Events & Alignment",
+            "status": _status(has_alignment_cfg, has_metric),
+            "detail": (
+                f"{len(event_df):,} events loaded; alignment configured."
+                if has_events and has_alignment_cfg
+                else "Manual alignment is available when no event file is loaded."
+                if has_metric and not has_events
+                else "Choose event or manual timestamp."
+            ),
+        },
+        {
+            "label": "5. Baseline & Pipeline",
+            "status": _status(has_processed, has_metric),
+            "detail": (
+                "Pipeline complete; baseline summary available."
+                if has_processed and has_baseline
+                else "Run preprocessing after baseline settings are reviewed."
+            ),
+        },
+        {
+            "label": "6. QC Plots",
+            "status": _status(has_processed, has_metric),
+            "detail": "Processed plots are available." if has_processed else "Raw preview is available after import.",
+        },
+        {
+            "label": "7. Export",
+            "status": _status(bool(st.session_state.export_zip_ready), has_metric),
+            "detail": (
+                "ZIP has been built in this session."
+                if st.session_state.export_zip_ready
+                else "Build the ZIP after reviewing the report."
+            ),
+        },
+        {
+            "label": "8. Analysis",
+            "status": _status(bool(st.session_state.analysis_tables), has_processed),
+            "detail": (
+                "Exploratory analysis tables are ready."
+                if st.session_state.analysis_tables
+                else "Run the preprocessing pipeline first."
+            ),
+        },
+    ]
+
+
+def _render_sidebar() -> str:
+    with st.sidebar:
+        st.subheader("Workflow Progress")
+        steps = _workflow_steps()
+        render_progress_stepper(steps)
+        st.divider()
+        labels = [
+            f"{'✓' if step['status'] == 'done' else '!' if step['status'] == 'ready' else '🔒'} {step['label']}"
+            for step in steps
+        ]
+        choice = st.radio("Go to step", labels, key="workflow_step_choice")
+        selected = steps[labels.index(choice)]
+        if selected["status"] == "locked":
+            st.warning("This step is locked until the earlier required workflow state exists.")
+        return selected["label"]
+
+
+# ---------------------------------------------------------------------------
+# Load-status helper
+# ---------------------------------------------------------------------------
+
+def _file_status_card(label: str, name: str, n_bytes: int, extra: str = "") -> None:
+    """Render a single loaded-file status row."""
+    kb = n_bytes / 1024
+    size_str = f"{kb:,.0f} KB" if kb < 1024 else f"{kb/1024:,.1f} MB"
+    st.markdown(
+        f"&nbsp;&nbsp;✅ **{label}** &nbsp;`{name}`&nbsp; "
+        f"<span style='color:grey;font-size:0.85em'>{size_str}{' — ' + extra if extra else ''}</span>",
+        unsafe_allow_html=True,
+    )
+
+
+def _render_load_status() -> None:
+    long_df = st.session_state.long_df
+    event_df = st.session_state.event_df
+
+    # ---- Per-file cards ----
+    st.subheader("Loaded files")
+
+    if st.session_state.metric_files:
+        for name, data in st.session_state.metric_files:
+            # Pull per-file stats from long_df
+            extra = ""
+            if long_df is not None and "source_file" in long_df.columns:
+                sub = long_df[long_df["source_file"] == name]
+                if not sub.empty:
+                    groups = ", ".join(sorted(sub["group_id"].dropna().unique()))
+                    n_subj = sub["subject_id"].nunique()
+                    n_rows = len(sub)
+                    nb = sub["native_bin_seconds"].dropna()
+                    bin_str = f"{nb.mode().iloc[0]:.0f}s bins" if not nb.empty else ""
+                    extra = (
+                        f"{n_rows:,} rows · {n_subj} subjects · groups: {groups}"
+                        + (f" · {bin_str}" if bin_str else "")
+                    )
+            _file_status_card("Metric", name, len(data), extra)
+    else:
+        st.info("No metric files loaded.")
+
+    if st.session_state.event_files:
+        for name, data in st.session_state.event_files:
+            extra = ""
+            if event_df is not None and "source_file" in event_df.columns:
+                sub = event_df[event_df["source_file"] == name]
+                if not sub.empty:
+                    counts = sub["event_type"].value_counts()
+                    extra = " · ".join(f"{v}×{k}" for k, v in counts.items())
+            _file_status_card("Events", name, len(data), extra)
+    else:
+        st.caption("No event files loaded — exclusion and event-based alignment will be skipped.")
+
+    # ---- Pipeline stage tracker ----
+    st.divider()
+    st.subheader("Pipeline readiness")
+
+    has_metric = long_df is not None and not long_df.empty
+    has_events = event_df is not None and not event_df.empty
+    has_subj_meta = st.session_state.subject_meta is not None
+    has_processed = st.session_state.processed_df is not None
+    has_baseline = (
+        st.session_state.baseline_summary is not None
+        and not st.session_state.baseline_summary.empty
+    )
+
+    aln_cfg = st.session_state.alignment_cfg
+    has_alignment_cfg = bool(
+        aln_cfg.get("event_type") or aln_cfg.get("fallback_timestamp")
+    )
+
+    def _stage(icon: str, label: str, detail: str = "") -> None:
+        suffix = f"  <span style='color:grey;font-size:0.85em'>{detail}</span>" if detail else ""
+        st.markdown(f"{icon} {label}{suffix}", unsafe_allow_html=True)
+
+    _stage(
+        "✅" if has_metric else "⬜",
+        "**Metric data loaded**",
+        f"{len(long_df):,} rows" if has_metric else "upload or load examples above",
+    )
+    _stage(
+        "✅" if has_events else "➖",
+        "**Event data loaded**",
+        f"{len(event_df):,} events" if has_events else "optional",
+    )
+    _stage(
+        "✅" if has_subj_meta else ("⬜" if has_metric else "🔒"),
+        "**Subject metadata initialised**",
+        "edit in Tab 3" if has_subj_meta else ("auto-built — go to Tab 3" if has_metric else "load data first"),
+    )
+    _stage(
+        "✅" if has_alignment_cfg else ("⬜" if has_metric else "🔒"),
+        "**Alignment configured**",
+        f"event: {aln_cfg.get('event_type') or 'manual'}" if has_alignment_cfg else "configure in Tab 4",
+    )
+    _stage(
+        "✅" if has_processed else ("⬜" if has_metric else "🔒"),
+        "**Pipeline run**",
+        "processed — go to Tab 6 for plots" if has_processed else "run in Tab 5",
+    )
+    _stage(
+        "✅" if has_baseline else ("⬜" if has_processed else "🔒"),
+        "**Baseline computed**",
+        f"{len(st.session_state.baseline_summary)} subject/metric pairs" if has_baseline else "",
+    )
+
+    # Warnings inline
+    warns = st.session_state.all_warnings
+    if warns:
+        with st.expander(f"⚠️ {len(warns)} warning(s)", expanded=False):
+            for w in warns:
+                st.warning(w)
+
+
+# ---------------------------------------------------------------------------
+# Tab 1: Import
+# ---------------------------------------------------------------------------
+
+def _tab_import() -> None:
+    st.header("Data Import")
+    render_contextual_help("import")
+
+    with st.expander("Data-flow diagram", expanded=False):
+        render_data_flow_diagram()
+
+    col_metric, col_event = st.columns(2)
+
+    with col_metric:
+        st.subheader("DVC Metric CSV files")
+        uploaded_metrics = st.file_uploader(
+            "Upload one or more metric CSV files",
+            type=["csv"],
+            accept_multiple_files=True,
+            key="upload_metric",
+        )
+
+    with col_event:
+        st.subheader("DVC Event CSV files (optional)")
+        uploaded_events = st.file_uploader(
+            "Upload one or more event CSV files",
+            type=["csv"],
+            accept_multiple_files=True,
+            key="upload_event",
+        )
+
+    # Load examples button
+    st.divider()
+    st.subheader("Or load bundled example files")
+    example_files = list_example_files(_EXAMPLES_DIR)
+    col_ex1, col_ex2 = st.columns(2)
+    with col_ex1:
+        if example_files["metric"]:
+            st.write("**Available metric examples:**")
+            for p in example_files["metric"]:
+                st.write(f"- `{p.name}`")
+    with col_ex2:
+        if example_files["event"]:
+            st.write("**Available event examples:**")
+            for p in example_files["event"]:
+                st.write(f"- `{p.name}`")
+
+    load_examples = st.button("Load example files", type="secondary")
+
+    # ---- Build file list ----
+    if load_examples:
+        metric_files = [(p.name, p.read_bytes()) for p in example_files["metric"]]
+        event_files = [(p.name, p.read_bytes()) for p in example_files["event"]]
+        st.session_state.metric_files = metric_files
+        st.session_state.event_files = event_files
+        # Reset subject/group meta so templates are rebuilt
+        st.session_state.subject_meta = None
+        st.session_state.group_meta = None
+        _parse_all_files()
+        st.success(
+            f"Loaded {len(metric_files)} metric file(s) and {len(event_files)} event file(s)."
+        )
+    elif uploaded_metrics or uploaded_events:
+        # Compare by name only — avoids reading bytes twice and is fast enough
+        new_metric_names = sorted(f.name for f in (uploaded_metrics or []))
+        old_metric_names = sorted(name for name, _ in st.session_state.metric_files)
+        new_event_names = sorted(f.name for f in (uploaded_events or []))
+        old_event_names = sorted(name for name, _ in st.session_state.event_files)
+
+        changed = new_metric_names != old_metric_names or new_event_names != old_event_names
+        if changed:
+            st.session_state.metric_files = [(f.name, f.read()) for f in (uploaded_metrics or [])]
+            st.session_state.event_files = [(f.name, f.read()) for f in (uploaded_events or [])]
+            st.session_state.subject_meta = None
+            st.session_state.group_meta = None
+            _parse_all_files()
+
+    # ---- Loading status panel ----
+    st.divider()
+    _render_load_status()
+
+
+# ---------------------------------------------------------------------------
+# Tab 2: Validate
+# ---------------------------------------------------------------------------
+
+def _tab_validate() -> None:
+    st.header("Data Validation")
+    render_contextual_help("validate")
+
+    long_df = st.session_state.long_df
+    event_df = st.session_state.event_df
+
+    if long_df is None:
+        st.info("No data loaded. Go to **Import** to upload or load example files.")
+        return
+
+    # Metric data overview
+    st.subheader("Metric data overview")
+
+    groups = sorted(long_df["group_id"].dropna().unique().tolist()) if "group_id" in long_df.columns else []
+    subjects = sorted(long_df["subject_id"].dropna().unique().tolist()) if "subject_id" in long_df.columns else []
+    metrics = sorted(long_df["metric_name"].dropna().unique().tolist()) if "metric_name" in long_df.columns else []
+    sources = sorted(long_df["source_file"].dropna().unique().tolist()) if "source_file" in long_df.columns else []
+
+    ts_range = "N/A"
+    if "timestamp_utc" in long_df.columns:
+        t = long_df["timestamp_utc"].dropna()
+        if not t.empty:
+            ts_range = f"{t.min()} → {t.max()}"
+
+    native_bin = "N/A"
+    if "native_bin_seconds" in long_df.columns:
+        nb = long_df["native_bin_seconds"].dropna().mode()
+        if not nb.empty:
+            native_bin = f"{nb.iloc[0]:.0f} s"
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Source files", len(sources))
+        st.metric("Detected groups", len(groups))
+    with col2:
+        st.metric("Detected subjects", len(subjects))
+        st.metric("Total rows (long)", f"{len(long_df):,}")
+    with col3:
+        st.metric("Metrics", len(metrics))
+        st.metric("Native bin size", native_bin)
+
+    st.write(f"**Timestamp range:** {ts_range}")
+    st.write(f"**Groups:** {', '.join(groups)}")
+    st.write(f"**Metrics:** {', '.join(metrics)}")
+
+    # Missing values
+    n_missing = int(long_df["value"].isna().sum())
+    if n_missing:
+        st.warning(f"{n_missing:,} rows have missing `value`.")
+
+    # Warnings
+    if st.session_state.all_warnings:
+        with st.expander(f"Parse warnings ({len(st.session_state.all_warnings)})"):
+            for w in st.session_state.all_warnings:
+                st.warning(w)
+
+    # Event data overview
+    st.subheader("Event data overview")
+    if event_df is not None and not event_df.empty:
+        st.write(f"Total events: **{len(event_df):,}**")
+        if "event_type" in event_df.columns:
+            vc = event_df["event_type"].value_counts().reset_index()
+            vc.columns = ["event_type", "count"]
+            st.dataframe(vc, width='stretch', hide_index=True)
+    else:
+        st.info("No event data loaded.")
+
+    # Data preview
+    st.subheader("Long-format data preview (first 200 rows)")
+    preview_cols = [
+        c for c in [
+            "source_file", "metric_name", "group_id", "subject_id",
+            "timestamp", "relative_time_seconds", "value",
+            "group_avg", "group_sem", "samples", "native_bin_seconds"
+        ] if c in long_df.columns
+    ]
+    st.dataframe(long_df[preview_cols].head(200), width='stretch', hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Tab 3: Metadata & Study Design
+# ---------------------------------------------------------------------------
+
+def _tab_metadata() -> None:
+    st.header("Experiment Metadata & Study Design")
+    render_contextual_help("metadata")
+
+    long_df = st.session_state.long_df
+    if long_df is None:
+        st.info("Load data first (Tab 1).")
+        return
+
+    # ---- 1. Study-level metadata ----
+    st.subheader("1. Study-level metadata")
+    sm = st.session_state.study_meta
+
+    with st.expander("Edit study metadata", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            sm["study_id"] = st.text_input("Study ID", value=sm.get("study_id", ""))
+            sm["study_name"] = st.text_input("Study name", value=sm.get("study_name", ""))
+            sm["project_name"] = st.text_input("Project name", value=sm.get("project_name", ""))
+            sm["partner_name"] = st.text_input("Partner name", value=sm.get("partner_name", ""))
+            sm["operator_name"] = st.text_input("Operator name", value=sm.get("operator_name", ""))
+            sm["species"] = st.text_input("Species", value=sm.get("species", "mouse"))
+            sm["strain"] = st.text_input("Strain", value=sm.get("strain", ""))
+        with c2:
+            sm["experiment_start_date"] = st.text_input(
+                "Experiment start date (YYYY-MM-DD)", value=sm.get("experiment_start_date", "")
+            )
+            sm["experiment_end_date"] = st.text_input(
+                "Experiment end date (YYYY-MM-DD)", value=sm.get("experiment_end_date", "")
+            )
+            sm["timezone"] = st.text_input(
+                "Timezone", value=sm.get("timezone", cfg.DEFAULT_TIMEZONE)
+            )
+            sm["light_on_time"] = st.text_input(
+                "Lights ON (HH:MM)", value=sm.get("light_on_time", "07:00")
+            )
+            sm["light_off_time"] = st.text_input(
+                "Lights OFF (HH:MM)", value=sm.get("light_off_time", "19:00")
+            )
+            sm["main_experimental_event_name"] = st.text_input(
+                "Main event name (e.g. surgery, injection)",
+                value=sm.get("main_experimental_event_name", ""),
+            )
+        sm["experiment_description"] = st.text_area(
+            "Experiment description", value=sm.get("experiment_description", "")
+        )
+        sm["notes"] = st.text_area("Notes", value=sm.get("notes", ""))
+
+        # Sync timezone/light cycle into processing config
+        st.session_state.timezone = sm["timezone"]
+        st.session_state.light_on = sm["light_on_time"]
+        st.session_state.light_off = sm["light_off_time"]
+
+    st.session_state.study_meta = sm
+
+    # ---- 2. Subject metadata ----
+    st.subheader("2. Subject-level metadata")
+    if st.session_state.subject_meta is None:
+        st.session_state.subject_meta = meta_mod.build_subject_metadata_template(long_df)
+    st.session_state.subject_meta = _normalise_metadata_table(
+        st.session_state.subject_meta, cfg.SUBJECT_METADATA_COLUMNS
+    )
+
+    st.write(
+        "Edit the table below. Required columns are marked in the editor; add rows for subjects "
+        "that need manual metadata entries."
+    )
+    edited_subject = st.data_editor(
+        st.session_state.subject_meta,
+        width='stretch',
+        num_rows="dynamic",
+        column_config=subject_column_config(),
+        key="subject_meta_editor",
+    )
+    st.session_state.subject_meta = _normalise_metadata_table(
+        edited_subject, cfg.SUBJECT_METADATA_COLUMNS
+    )
+
+    # Download blank template
+    template_csv = edited_subject.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download subject metadata template",
+        data=template_csv,
+        file_name="subject_metadata_template.csv",
+        mime="text/csv",
+    )
+
+    # Re-upload filled template
+    uploaded_meta = st.file_uploader(
+        "Re-upload filled subject metadata CSV", type=["csv"], key="reupload_subject_meta"
+    )
+    if uploaded_meta is not None:
+        try:
+            uploaded_df = pd.read_csv(uploaded_meta)
+            st.session_state.subject_meta = _normalise_metadata_table(
+                uploaded_df, cfg.SUBJECT_METADATA_COLUMNS
+            )
+            st.success(f"Loaded subject metadata: {len(uploaded_df)} rows.")
+        except Exception as exc:
+            st.error(f"Could not read metadata file: {exc}")
+
+    # Validation
+    errors, meta_warns = meta_mod.validate_subject_metadata(
+        st.session_state.subject_meta, long_df
+    )
+    if errors:
+        for e in errors:
+            st.error(e)
+    if meta_warns:
+        for w in meta_warns:
+            st.warning(w)
+    if not errors and not meta_warns:
+        st.success("Subject metadata validated.")
+
+    # ---- 3. Group metadata ----
+    st.subheader("3. Group-level metadata")
+    if st.session_state.group_meta is None:
+        st.session_state.group_meta = meta_mod.build_group_metadata_template(long_df)
+    st.session_state.group_meta = _normalise_metadata_table(
+        st.session_state.group_meta, cfg.GROUP_METADATA_COLUMNS
+    )
+
+    st.write(
+        "Map DVC group names to scientific labels. "
+        "The `group_label` column will be used in plots and exports."
+    )
+    with st.expander("Guided group builder", expanded=False):
+        detected_subjects = sorted(long_df["subject_id"].dropna().astype(str).unique().tolist())
+        n_groups = st.number_input(
+            "How many groups do you have?",
+            min_value=1,
+            max_value=max(1, len(detected_subjects)),
+            value=max(1, len(st.session_state.group_meta)),
+            step=1,
+        )
+        current = st.session_state.group_meta.copy().reset_index(drop=True)
+        while len(current) < n_groups:
+            idx = len(current) + 1
+            current.loc[len(current), :] = {
+                "group_id": f"group_{idx}",
+                "group_label": f"Group {idx}",
+                "group_color": "#1f77b4",
+            }
+        st.session_state.group_meta = _normalise_metadata_table(
+            current.head(int(n_groups)), cfg.GROUP_METADATA_COLUMNS
+        )
+        st.caption("Use the group table below for labels, colors, and treatment descriptions.")
+
+    edited_group = st.data_editor(
+        st.session_state.group_meta,
+        width='stretch',
+        num_rows="fixed",
+        column_config=group_column_config(),
+        key="group_meta_editor",
+    )
+    st.session_state.group_meta = _normalise_metadata_table(
+        edited_group, cfg.GROUP_METADATA_COLUMNS
+    )
+
+    with st.expander("Assign animals to groups", expanded=False):
+        if st.session_state.subject_meta is not None and not st.session_state.subject_meta.empty:
+            subjects = sorted(st.session_state.subject_meta["subject_id"].dropna().astype(str).unique().tolist())
+            assigned_updates: dict[str, str] = {}
+            for _, group_row in st.session_state.group_meta.iterrows():
+                label = str(group_row.get("group_label") or group_row.get("group_id") or "").strip()
+                if not label:
+                    continue
+                current_subjects = st.session_state.subject_meta[
+                    st.session_state.subject_meta["treatment_group"].astype(str) == label
+                ]["subject_id"].astype(str).tolist()
+                selected_subjects = st.multiselect(
+                    label,
+                    subjects,
+                    default=[s for s in current_subjects if s in subjects],
+                    key=f"group_assign_{label}",
+                )
+                for sid in selected_subjects:
+                    assigned_updates[sid] = label
+            if assigned_updates:
+                for sid, label in assigned_updates.items():
+                    mask = st.session_state.subject_meta["subject_id"].astype(str) == sid
+                    st.session_state.subject_meta.loc[mask, "treatment_group"] = label
+
+    # Download
+    grp_csv = edited_group.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download group metadata",
+        data=grp_csv,
+        file_name="group_metadata.csv",
+        mime="text/csv",
+    )
+
+    # ---- 4. Treatment schedule ----
+    st.subheader("4. Treatment schedule")
+    st.write(
+        "Add repeated treatments, injections, surgeries, or dosing events. These rows are "
+        "exported and can be used to document alignment choices."
+    )
+    treatment_cols = ["animal_id", "event_type", "timestamp", "dose", "unit", "route", "notes"]
+    st.session_state.treatment_schedule = _normalise_metadata_table(
+        st.session_state.treatment_schedule, treatment_cols
+    )
+    st.session_state.treatment_schedule = st.data_editor(
+        st.session_state.treatment_schedule,
+        width="stretch",
+        num_rows="dynamic",
+        column_config={
+            "animal_id": st.column_config.TextColumn(
+                "Animal ID", help="Animal identifier matching the subject metadata table.", required=True
+            ),
+            "event_type": st.column_config.TextColumn(
+                "Event type", help="Example: injection, surgery, gavage, drug_on.", required=True
+            ),
+            "timestamp": st.column_config.TextColumn(
+                "Timestamp", help="ISO timestamp for the treatment event.", required=True
+            ),
+            "dose": st.column_config.NumberColumn("Dose", help="Numeric dose when relevant."),
+            "unit": st.column_config.TextColumn("Unit", help="Example: mg/kg, uL, mL."),
+            "route": st.column_config.TextColumn("Route", help="Example: i.p., s.c., oral."),
+            "notes": st.column_config.TextColumn("Notes"),
+        },
+        key="treatment_schedule_editor",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Tab 4: Events, Alignment & Exclusions
+# ---------------------------------------------------------------------------
+
+def _tab_events() -> None:
+    st.header("Events, Alignment & Exclusions")
+    render_contextual_help("events")
+
+    event_df = st.session_state.event_df
+
+    # ---- Event table preview ----
+    st.subheader("Event table")
+    if event_df is not None and not event_df.empty:
+        cage_pairs = exclusions.detect_cage_change_pairs(
+            event_df,
+            max_gap_hours=float(st.session_state.exclusion_rules.get("CAGE_CHANGE", {}).get("max_gap_hours", 6.0)),
+        )
+        if not cage_pairs.empty:
+            st.info(
+                f"Detected {len(cage_pairs)} REMOVED/INSERTED cage-change pair(s). "
+                "Use the CAGE_CHANGE exclusion rule for asymmetric handling."
+            )
+            with st.expander("Detected cage-change pairs", expanded=False):
+                st.dataframe(cage_pairs, width="stretch", hide_index=True)
+
+        # Filter controls
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            etypes = ["All"] + sorted(event_df["event_type"].dropna().unique().tolist())
+            sel_type = st.selectbox("Filter by event type", etypes)
+        with c2:
+            groups = ["All"] + sorted(event_df["group_id"].dropna().unique().tolist())
+            sel_grp = st.selectbox("Filter by group", groups)
+        with c3:
+            subjects = ["All"] + sorted(event_df["subject_id"].dropna().unique().tolist())
+            sel_sub = st.selectbox("Filter by subject", subjects)
+
+        display_ev = event_df.copy()
+        if sel_type != "All":
+            display_ev = display_ev[display_ev["event_type"] == sel_type]
+        if sel_grp != "All":
+            display_ev = display_ev[display_ev["group_id"] == sel_grp]
+        if sel_sub != "All":
+            display_ev = display_ev[display_ev["subject_id"] == sel_sub]
+
+        st.dataframe(display_ev.head(500), width='stretch', hide_index=True)
+    else:
+        st.info("No event file loaded. Alignment and event-based exclusion will be skipped.")
+
+    st.subheader("Facility event calendar")
+    st.write("Add room-level or facility-level events that affect every animal or selected groups.")
+    facility_cols = ["timestamp_start", "timestamp_end", "event_type", "affected_groups", "notes"]
+    st.session_state.facility_events = _normalise_metadata_table(
+        st.session_state.facility_events, facility_cols
+    )
+    st.session_state.facility_events = st.data_editor(
+        st.session_state.facility_events,
+        width="stretch",
+        num_rows="dynamic",
+        column_config={
+            "timestamp_start": st.column_config.TextColumn(
+                "Start timestamp", help="Required ISO timestamp for event start.", required=True
+            ),
+            "timestamp_end": st.column_config.TextColumn(
+                "End timestamp", help="Optional ISO timestamp; start is used if empty."
+            ),
+            "event_type": st.column_config.TextColumn(
+                "Event type", help="Example: room_alarm, power_outage, caretaker_change."
+            ),
+            "affected_groups": st.column_config.TextColumn(
+                "Affected groups", help="Leave blank for all groups, or enter one DVC group ID."
+            ),
+            "notes": st.column_config.TextColumn("Notes"),
+        },
+        key="facility_events_editor",
+    )
+
+    # ---- Alignment configuration ----
+    st.subheader("Alignment")
+    aln = st.session_state.alignment_cfg
+    event_types_avail = (
+        ev_mod.get_unique_event_types(event_df)
+        if event_df is not None and not event_df.empty
+        else []
+    )
+
+    alignment_mode = st.radio(
+        "Alignment mode",
+        ["Event-based", "Manual global timestamp", "Disabled"],
+        index=0,
+    )
+    aln["label"] = st.text_input("Alignment label", value=aln.get("label", "J0"))
+    aln["scope"] = st.selectbox("Scope", ["subject", "group"], index=0)
+
+    if alignment_mode == "Event-based":
+        if event_types_avail:
+            sel_etype = st.selectbox(
+                "Alignment event type",
+                event_types_avail,
+                index=0,
+            )
+            aln["event_type"] = sel_etype
+        else:
+            st.info("No events loaded. Set a manual fallback below.")
+            aln["event_type"] = None
+        aln["fallback_timestamp"] = st.text_input(
+            "Fallback timestamp if no subject event (ISO format, UTC)",
+            value=aln.get("fallback_timestamp") or "",
+        ) or None
+
+    elif alignment_mode == "Manual global timestamp":
+        aln["event_type"] = None
+        aln["fallback_timestamp"] = st.text_input(
+            "Global alignment timestamp (ISO format, UTC)",
+            value=aln.get("fallback_timestamp") or "",
+        ) or None
+
+    else:  # Disabled
+        aln["event_type"] = None
+        aln["fallback_timestamp"] = None
+
+    st.session_state.alignment_cfg = aln
+
+    # ---- Exclusion rules ----
+    st.subheader("Exclusion rules")
+    st.write(
+        "Configure exclusion windows around each event type. "
+        "Excluded rows are retained but flagged in the output."
+    )
+
+    rules = st.session_state.exclusion_rules
+    all_event_types = sorted(
+        set(rules.keys())
+        | (set(event_df["event_type"].dropna().unique()) if event_df is not None and not event_df.empty else set())
+    )
+
+    for etype in all_event_types:
+        rule = rules.get(etype, {"before_hours": 0.0, "after_hours": 0.0, "exclude": False, "flag": False})
+        with st.expander(f"Rule: {etype}", expanded=etype in cfg.DEFAULT_EXCLUSION_RULES):
+            c1, c2, c3, c4 = st.columns(4)
+            with c1:
+                before = st.number_input(
+                    "Before REMOVED / event (h)", value=float(rule.get("before_hours", 0.0)),
+                    min_value=0.0, step=1.0, key=f"excl_before_{etype}"
+                )
+            with c2:
+                after = st.number_input(
+                    "After INSERTED / event (h)", value=float(rule.get("after_hours", 0.0)),
+                    min_value=0.0, step=1.0, key=f"excl_after_{etype}"
+                )
+            with c3:
+                do_excl = st.checkbox(
+                    "Exclude rows", value=bool(rule.get("exclude", False)), key=f"excl_excl_{etype}"
+                )
+            with c4:
+                do_flag = st.checkbox(
+                    "Flag rows", value=bool(rule.get("flag", False)), key=f"excl_flag_{etype}"
+                )
+            max_gap = rule.get("max_gap_hours")
+            if etype == "CAGE_CHANGE":
+                max_gap = st.number_input(
+                    "Maximum REMOVED→INSERTED pairing gap (h)",
+                    value=float(rule.get("max_gap_hours", 6.0)),
+                    min_value=0.0,
+                    step=0.5,
+                    key=f"excl_max_gap_{etype}",
+                )
+            rules[etype] = {
+                "before_hours": before,
+                "after_hours": after,
+                "exclude": do_excl,
+                "flag": do_flag,
+            }
+            if max_gap is not None:
+                rules[etype]["max_gap_hours"] = max_gap
+
+    st.session_state.exclusion_rules = rules
+
+
+# ---------------------------------------------------------------------------
+# Tab 5: Baseline & Aggregation
+# ---------------------------------------------------------------------------
+
+def _tab_baseline() -> None:
+    st.header("Baseline & Aggregation")
+    render_contextual_help("baseline")
+
+    long_df = st.session_state.long_df
+    if long_df is None:
+        st.info("Load data first (Tab 1).")
+        return
+
+    # ---- Baseline configuration ----
+    st.subheader("Baseline configuration")
+    bsl = st.session_state.baseline_cfg
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        bsl["start_hours"] = st.number_input(
+            "Window start (h relative to event)",
+            value=float(bsl.get("start_hours", -72)),
+            step=1.0,
+            key="bsl_start",
+        )
+    with c2:
+        bsl["end_hours"] = st.number_input(
+            "Window end (h relative to event)",
+            value=float(bsl.get("end_hours", -24)),
+            step=1.0,
+            key="bsl_end",
+        )
+    with c3:
+        bsl["min_coverage"] = st.slider(
+            "Min coverage (fraction)",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(bsl.get("min_coverage", 0.7)),
+            step=0.05,
+            key="bsl_cov",
+        )
+    with c4:
+        bsl["exclude_excluded"] = st.checkbox(
+            "Exclude flagged rows from baseline",
+            value=bool(bsl.get("exclude_excluded", True)),
+            key="bsl_excl",
+        )
+    bsl["impute_from_group_mean"] = st.checkbox(
+        "Impute invalid baselines from group mean",
+        value=bool(bsl.get("impute_from_group_mean", False)),
+        key="bsl_impute_group",
+    )
+    st.session_state.baseline_cfg = bsl
+
+    with st.expander("Manual baseline overrides", expanded=False):
+        st.session_state.baseline_overrides = st.data_editor(
+            st.session_state.baseline_overrides,
+            width="stretch",
+            num_rows="dynamic",
+            column_config={
+                "subject_id": st.column_config.TextColumn("Subject ID", required=True),
+                "metric_name": st.column_config.TextColumn("Metric", required=True),
+                "baseline_value": st.column_config.NumberColumn("Baseline value", required=True),
+                "notes": st.column_config.TextColumn("Notes"),
+            },
+            key="baseline_overrides_editor",
+        )
+
+    if st.session_state.alignment_cfg.get("event_type") is None and not st.session_state.alignment_cfg.get("fallback_timestamp"):
+        st.warning(
+            "No alignment event configured. Baseline requires alignment. "
+            "Configure alignment in Tab 4, or the baseline step will be skipped."
+        )
+
+    # ---- Aggregation ----
+    st.subheader("Aggregation")
+    agg_keys = list(cfg.AGGREGATION_OPTIONS.keys())
+    sel_agg = st.selectbox("Aggregation bin size", agg_keys, index=0)
+    st.session_state.aggregation_bin = cfg.AGGREGATION_OPTIONS[sel_agg]
+
+    # ---- Run pipeline ----
+    st.divider()
+    st.subheader("Run full preprocessing pipeline")
+    st.write(
+        "This will apply: metadata merge → light/dark annotation → "
+        "exclusions → alignment → baseline computation."
+    )
+
+    if st.button("Run pipeline", type="primary"):
+        with st.spinner("Processing…"):
+            _run_pipeline()
+        ts = st.session_state.pipeline_run_ts
+        if ts:
+            st.success(f"Pipeline complete. {ts.strftime('%H:%M:%S')}")
+
+    # ---- Results preview ----
+    if st.session_state.processed_df is not None:
+        proc = st.session_state.processed_df
+        st.subheader("Processed data summary")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            n_excl = int(proc["is_excluded"].sum()) if "is_excluded" in proc.columns else 0
+            st.metric("Excluded rows", f"{n_excl:,}")
+        with col2:
+            if "baseline_valid" in proc.columns:
+                n_valid_bsl = int(proc["baseline_valid"].sum())
+                st.metric("Rows with valid baseline", f"{n_valid_bsl:,}")
+        with col3:
+            if "time_from_event_hours" in proc.columns:
+                n_aligned = int(proc["time_from_event_hours"].notna().sum())
+                st.metric("Aligned rows", f"{n_aligned:,}")
+
+        # Baseline summary table
+        if st.session_state.baseline_summary is not None and not st.session_state.baseline_summary.empty:
+            st.subheader("Baseline validity per subject/metric")
+            st.dataframe(st.session_state.baseline_summary, width='stretch', hide_index=True)
+
+        # Warnings
+        warns = st.session_state.all_warnings
+        if warns:
+            with st.expander(f"Warnings ({len(warns)})"):
+                for w in warns:
+                    st.warning(w)
+
+
+# ---------------------------------------------------------------------------
+# Tab 6: QC Plots
+# ---------------------------------------------------------------------------
+
+def _tab_qc() -> None:
+    st.header("QC Visualisations")
+    render_contextual_help("qc")
+
+    proc = st.session_state.processed_df
+    long_df = st.session_state.long_df
+
+    display_df = proc if proc is not None else long_df
+
+    if display_df is None:
+        st.info("No data available. Load and process data first.")
+        return
+
+    with st.expander("Data quality report", expanded=False):
+        irregular = qc.detect_irregular_bins(display_df)
+        if irregular.empty:
+            st.caption("No timestamp interval report available.")
+        else:
+            flagged = irregular[irregular["irregular_bins"]]
+            if flagged.empty:
+                st.success("No irregular subject/metric timestamp intervals detected.")
+            else:
+                st.warning(f"{len(flagged)} subject/metric stream(s) have irregular timestamp intervals.")
+            st.dataframe(irregular, width="stretch", hide_index=True)
+
+        if st.session_state.baseline_summary is not None and not st.session_state.baseline_summary.empty:
+            st.plotly_chart(qc.plot_baseline_quality_heatmap(st.session_state.baseline_summary), width="stretch")
+
+    metrics = sorted(display_df["metric_name"].dropna().unique().tolist()) if "metric_name" in display_df.columns else []
+    subjects = sorted(display_df["subject_id"].dropna().unique().tolist()) if "subject_id" in display_df.columns else []
+    groups = sorted(display_df["group_id"].dropna().unique().tolist()) if "group_id" in display_df.columns else []
+
+    c1, c2, c3 = st.columns([2, 3, 2])
+    with c1:
+        sel_metric = st.selectbox("Metric", metrics) if metrics else None
+    with c2:
+        sel_subjects = st.multiselect("Subjects (leave empty = all)", subjects, default=subjects[:6])
+    with c3:
+        sel_groups = st.multiselect("Groups", groups, default=groups)
+
+    if not sel_metric:
+        st.info("No metric selected.")
+        return
+
+    y_col_options = ["value", "baseline_corrected_value", "baseline_percent_change"]
+    y_col_options = [c for c in y_col_options if c in display_df.columns]
+    sel_y = st.selectbox("Y axis", y_col_options)
+
+    # Plot 1: Raw timeseries
+    st.subheader("Raw timeseries")
+    x_col = "timestamp_local" if "timestamp_local" in display_df.columns else "timestamp_utc"
+    fig1 = qc.plot_raw_timeseries(
+        display_df, sel_metric,
+        subjects=sel_subjects if sel_subjects else None,
+        x_col=x_col,
+        show_exclusions=True,
+    )
+    st.plotly_chart(fig1, width='stretch')
+
+    # Plot 2: Aligned timeseries
+    if "time_from_event_hours" in display_df.columns and not display_df["time_from_event_hours"].isna().all():
+        st.subheader("Aligned timeseries")
+        bsl_cfg = st.session_state.baseline_cfg
+        fig2 = qc.plot_aligned_timeseries(
+            display_df, sel_metric,
+            subjects=sel_subjects if sel_subjects else None,
+            y_col=sel_y,
+            show_exclusions=True,
+            show_baseline_window=True,
+            baseline_start_h=float(bsl_cfg.get("start_hours", -72)),
+            baseline_end_h=float(bsl_cfg.get("end_hours", -24)),
+        )
+        st.plotly_chart(fig2, width='stretch')
+
+        # Plot 3: Group mean
+        st.subheader("Group mean ± SEM")
+        fig3 = qc.plot_group_mean_timeseries(
+            display_df, sel_metric,
+            y_col=sel_y,
+            groups=sel_groups if sel_groups else None,
+        )
+        st.plotly_chart(fig3, width='stretch')
+    else:
+        st.info("Run alignment (Tab 4) and the pipeline (Tab 5) to see aligned plots.")
+
+
+# ---------------------------------------------------------------------------
+# Tab 7: Export
+# ---------------------------------------------------------------------------
+
+def _tab_export() -> None:
+    st.header("Export")
+    render_contextual_help("export")
+
+    long_df = st.session_state.long_df
+    proc = st.session_state.processed_df
+
+    with st.expander("Output-column glossary", expanded=False):
+        render_output_glossary(proc.columns if proc is not None else None)
+
+    if long_df is None:
+        st.info("Load data first.")
+        return
+
+    # Collect all warnings accumulated so far
+    warns = st.session_state.all_warnings
+
+    # Build analysis config
+    tz = st.session_state.timezone
+    aln_cfg = st.session_state.alignment_cfg
+    bsl_cfg = st.session_state.baseline_cfg
+
+    uploaded_names = [name for name, _ in st.session_state.metric_files + st.session_state.event_files]
+
+    analysis_config = exp_mod.build_analysis_config(
+        uploaded_files=uploaded_names,
+        study_metadata=st.session_state.study_meta,
+        timezone=tz,
+        light_on=st.session_state.light_on,
+        light_off=st.session_state.light_off,
+        alignment_cfg=aln_cfg,
+        exclusion_rules=st.session_state.exclusion_rules,
+        baseline_cfg=bsl_cfg,
+        aggregation_bin=st.session_state.aggregation_bin,
+    )
+
+    # Generate reports
+    proc_report = reporting.generate_processing_report(
+        long_df=long_df,
+        processed_df=proc,
+        event_df=st.session_state.event_df,
+        exclusion_log=st.session_state.exclusion_log,
+        baseline_summary=st.session_state.baseline_summary,
+        warnings=warns,
+        analysis_config=analysis_config,
+    )
+
+    _subject_meta_for_validation = (
+        st.session_state.subject_meta
+        if st.session_state.subject_meta is not None
+        else pd.DataFrame()
+    )
+    meta_errors, meta_warns = meta_mod.validate_subject_metadata(
+        _subject_meta_for_validation, long_df
+    )
+    meta_report = reporting.generate_metadata_validation_report(
+        meta_errors, meta_warns, st.session_state.subject_meta
+    )
+
+    # Preview processing report
+    st.subheader("Processing report preview")
+    st.markdown(proc_report)
+
+    # Build ZIP
+    if st.button("Build export ZIP", type="primary"):
+        with st.spinner("Building ZIP…"):
+            estimated_bytes = int(proc.memory_usage(deep=True).sum()) if proc is not None else 0
+            export_kwargs = dict(
+                processed_df=proc,
+                baseline_summary=st.session_state.baseline_summary,
+                exclusion_log=st.session_state.exclusion_log,
+                event_table=st.session_state.event_df,
+                subject_metadata=st.session_state.subject_meta,
+                group_metadata=st.session_state.group_meta,
+                study_metadata=st.session_state.study_meta,
+                analysis_config=analysis_config,
+                processing_report=proc_report,
+                metadata_validation_report=meta_report,
+                treatment_schedule=st.session_state.treatment_schedule,
+                facility_events=st.session_state.facility_events,
+                analysis_tables=st.session_state.analysis_tables,
+                figures=st.session_state.analysis_figures,
+            )
+            if estimated_bytes > 500_000_000:
+                tmp_dir = Path(tempfile.mkdtemp(prefix="dvc_export_"))
+                zip_path = exp_mod.create_export_zip_file(tmp_dir / "DVC_Workbench_Export.zip", **export_kwargs)
+                zip_data = open(zip_path, "rb")
+            else:
+                zip_data = exp_mod.create_export_zip(**export_kwargs)
+
+        st.download_button(
+            label="Download DVC_Workbench_Export.zip",
+            data=zip_data,
+            file_name="DVC_Workbench_Export.zip",
+            mime="application/zip",
+        )
+        st.session_state.export_zip_ready = True
+        st.success("ZIP ready.")
+
+    # Show list of files in ZIP
+    st.subheader("ZIP contents")
+    for fname in [
+        "processed_timeseries.csv",
+        "baseline_summary.csv",
+        "exclusion_log.csv",
+        "event_table_clean.csv",
+        "subject_metadata.csv",
+        "group_metadata.csv",
+        "treatment_schedule.csv",
+        "facility_events.csv",
+        "daily_means.csv",
+        "circadian_summary.csv",
+        "light_dark_summary.csv",
+        "auc_summary.csv",
+        "stats_summary.csv",
+        "figures/",
+        "study_metadata.yaml",
+        "event_metadata.csv",
+        "analysis_config.yaml",
+        "processing_report.md",
+        "metadata_validation_report.md",
+    ]:
+        included = (
+            (fname == "processed_timeseries.csv" and proc is not None)
+            or (fname == "baseline_summary.csv" and st.session_state.baseline_summary is not None)
+            or (fname == "exclusion_log.csv" and st.session_state.exclusion_log is not None)
+            or (fname == "event_table_clean.csv" and st.session_state.event_df is not None)
+            or (fname == "subject_metadata.csv" and st.session_state.subject_meta is not None)
+            or (fname == "group_metadata.csv" and st.session_state.group_meta is not None)
+            or (
+                fname == "treatment_schedule.csv"
+                and st.session_state.treatment_schedule is not None
+                and not st.session_state.treatment_schedule.empty
+            )
+            or (
+                fname == "facility_events.csv"
+                and st.session_state.facility_events is not None
+                and not st.session_state.facility_events.empty
+            )
+            or fname in st.session_state.analysis_tables
+            or (fname == "figures/" and bool(st.session_state.analysis_figures))
+            or fname in ("study_metadata.yaml", "analysis_config.yaml", "processing_report.md",
+                         "metadata_validation_report.md", "event_metadata.csv")
+        )
+        icon = "✓" if included else "–"
+        st.write(f"{icon} `{fname}`")
+
+
+# ---------------------------------------------------------------------------
+# Tab 8: Analysis
+# ---------------------------------------------------------------------------
+
+def _tab_analysis() -> None:
+    st.header("Exploratory Analysis")
+    render_contextual_help("analysis")
+    st.info(
+        "These results are for orientation only. Consult a statistician for confirmatory analysis."
+    )
+
+    proc = st.session_state.processed_df
+    if proc is None or proc.empty:
+        st.info("Run the preprocessing pipeline before using the analysis page.")
+        return
+
+    metrics = sorted(proc["metric_name"].dropna().unique().tolist()) if "metric_name" in proc.columns else []
+    if not metrics:
+        st.info("No metric column available.")
+        return
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        sel_metric = st.selectbox("Metric", metrics, key="analysis_metric")
+    with c2:
+        value_options = [
+            c for c in ["baseline_percent_change", "baseline_corrected_value", "value"] if c in proc.columns
+        ]
+        sel_value = st.selectbox("Value", value_options, key="analysis_value")
+    with c3:
+        bin_size = st.selectbox("Summary bin", ["1D", "2D", "1W"], key="analysis_bin")
+
+    auc_c1, auc_c2 = st.columns(2)
+    with auc_c1:
+        auc_start = st.number_input("AUC start (h)", value=0.0, step=24.0)
+    with auc_c2:
+        auc_end = st.number_input("AUC end (h)", value=168.0, step=24.0)
+
+    metric_df = proc[proc["metric_name"] == sel_metric].copy()
+    circadian, circ_warns = analysis.summarize_circadian_cosinor(metric_df, value_col="value")
+    phase, phase_warns = analysis.summarize_light_dark(metric_df, value_col="value")
+    time_bins, bin_warns = analysis.summarize_time_bins(
+        metric_df,
+        bin_size=bin_size,
+        relative_to="alignment",
+        value_col=sel_value,
+    )
+    auc, auc_warns = analysis.compute_auc_per_animal(
+        metric_df,
+        start=auc_start,
+        end=auc_end,
+        value_col=sel_value,
+    )
+    stats, stats_warns = (
+        analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
+    )
+    analysis_warns = circ_warns + phase_warns + bin_warns + auc_warns + stats_warns
+
+    st.session_state.analysis_tables = {
+        "daily_means.csv": time_bins,
+        "circadian_summary.csv": circadian,
+        "light_dark_summary.csv": phase,
+        "auc_summary.csv": auc,
+        "stats_summary.csv": stats,
+    }
+    st.session_state.analysis_warning = "\n".join(analysis_warns)
+
+    if analysis_warns:
+        for warning in analysis_warns:
+            st.warning(warning)
+
+    st.subheader("Baseline-corrected group plot")
+    fig = qc.plot_group_mean_timeseries(metric_df, sel_metric, y_col=sel_value)
+    st.plotly_chart(fig, width="stretch")
+    st.session_state.analysis_figures = {"analysis_group_mean.png": fig}
+
+    st.subheader("Time-bin group summary")
+    st.dataframe(time_bins, width="stretch", hide_index=True)
+
+    st.subheader("AUC per animal")
+    st.dataframe(auc, width="stretch", hide_index=True)
+
+    st.subheader("Circadian cosinor summary")
+    st.dataframe(circadian, width="stretch", hide_index=True)
+
+    with st.expander("Light/dark summary", expanded=False):
+        st.dataframe(phase, width="stretch", hide_index=True)
+
+    st.subheader("Exploratory statistics")
+    if stats.empty:
+        st.caption("Statistics table is empty. AUC needs at least one plottable animal per group.")
+    else:
+        st.dataframe(stats, width="stretch", hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main() -> None:
+    st.set_page_config(
+        page_title=cfg.APP_NAME,
+        page_icon="DVC",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    _init_state()
+
+    selected_step = _render_sidebar()
+
+    st.title(cfg.APP_NAME)
+    st.caption(f"v{cfg.APP_VERSION}  |  Digital Ventilated Cage behavioral data preprocessing")
+
+    if selected_step.startswith("1."):
+        _tab_import()
+    elif selected_step.startswith("2."):
+        _tab_validate()
+    elif selected_step.startswith("3."):
+        _tab_metadata()
+    elif selected_step.startswith("4."):
+        _tab_events()
+    elif selected_step.startswith("5."):
+        _tab_baseline()
+    elif selected_step.startswith("6."):
+        _tab_qc()
+    elif selected_step.startswith("7."):
+        _tab_export()
+    elif selected_step.startswith("8."):
+        _tab_analysis()
+
+
+if __name__ == "__main__":
+    main()
