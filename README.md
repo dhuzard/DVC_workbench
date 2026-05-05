@@ -180,6 +180,14 @@ pytest --tb=short
 
 ---
 
+## What's new in v0.2
+
+- **Data quality diagnostics** — A `quality.py` module produces a per-subject/metric quality report flagging: missing-value rate, duplicate timestamps, negative values, zero-variance streams, long gaps, and irregular sampling intervals. `quality_report.csv` is now included in every export ZIP.
+- **Reproducibility manifest** — Every export ZIP now includes `manifest.yaml` with SHA-256 hashes of all input files, row counts for each output table, selected processing config, app version, and processing timestamp. A provenance summary is shown on the Export page before download.
+- **Effect sizes and FDR correction** — Exploratory group comparisons now report rank-biserial correlation (Mann-Whitney U) or epsilon-squared (Kruskal-Wallis) effect sizes alongside Benjamini-Hochberg FDR q-values. `stats_summary.csv` includes `effect_size`, `effect_size_name`, `q_value`, and `q_label` columns.
+
+---
+
 ## Current roadmap
 
 The v0.2 roadmap in `TODO.md` focuses on:
