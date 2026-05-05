@@ -7,6 +7,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 import zipfile
+from datetime import date
 from datetime import datetime
 from datetime import timezone as _dt_timezone
 from typing import Any
@@ -66,6 +67,7 @@ def create_export_zip(
     facility_events: pd.DataFrame | None = None,
     analysis_tables: dict[str, pd.DataFrame] | None = None,
     figures: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
 ) -> bytes:
     """
     Assemble all artefacts into an in-memory ZIP and return the bytes.
@@ -143,6 +145,13 @@ def create_export_zip(
                 "metadata_validation_report.md", _text_to_bytes(metadata_validation_report)
             )
 
+        if manifest is not None:
+            safe_manifest = _make_yaml_safe(manifest)
+            zf.writestr(
+                "manifest.yaml",
+                _text_to_bytes(yaml.dump(safe_manifest, allow_unicode=True, sort_keys=False)),
+            )
+
         # Placeholder event metadata (user-defined events)
         zf.writestr(
             "event_metadata.csv",
@@ -172,6 +181,7 @@ def create_export_zip_file(
     facility_events: pd.DataFrame | None = None,
     analysis_tables: dict[str, pd.DataFrame] | None = None,
     figures: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
 ) -> Path:
     """Build the export ZIP directly on disk and return its path.
 
@@ -225,6 +235,12 @@ def create_export_zip_file(
             zf.writestr("processing_report.md", _text_to_bytes(processing_report))
         if metadata_validation_report:
             zf.writestr("metadata_validation_report.md", _text_to_bytes(metadata_validation_report))
+        if manifest is not None:
+            safe_manifest = _make_yaml_safe(manifest)
+            zf.writestr(
+                "manifest.yaml",
+                _text_to_bytes(yaml.dump(safe_manifest, allow_unicode=True, sort_keys=False)),
+            )
         zf.writestr(
             "event_metadata.csv",
             _text_to_bytes(
@@ -238,10 +254,16 @@ def create_export_zip_file(
 def _make_yaml_safe(obj: Any) -> Any:
     if isinstance(obj, dict):
         return {k: _make_yaml_safe(v) for k, v in obj.items()}
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [_make_yaml_safe(v) for v in obj]
     if isinstance(obj, pd.Timestamp):
         return obj.isoformat()
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    if isinstance(obj, date):
+        return obj.isoformat()
+    if isinstance(obj, Path):
+        return str(obj)
     if isinstance(obj, float) and (obj != obj):  # NaN
         return None
     return obj

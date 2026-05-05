@@ -1,6 +1,6 @@
 # DVC Behavioral Preprocessing Workbench
 
-A Python + Streamlit MVP for preprocessing binned **Digital Ventilated Cage (DVC)** behavioral data exports.
+A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cage (DVC)** behavioral data exports, reviewing quality/confounds, and producing traceable outputs for exploratory analysis.
 
 > **Note:** DVC here means *Digital Ventilated Cage* (Tecniplast/TSE), **not** Data Version Control.
 
@@ -26,15 +26,16 @@ ruff check .
 
 ## Features
 
-| Tab | What it does |
-|-----|-------------|
-| 1 · Import | Upload DVC metric & event CSVs, or load bundled examples |
-| 2 · Validate | Detect groups, subjects, timestamps, native bin size, show warnings |
-| 3 · Metadata & Study Design | Edit study / subject / group metadata; download/re-upload templates |
-| 4 · Events, Alignment & Exclusions | Preview events; configure alignment event & exclusion windows |
-| 5 · Baseline & Aggregation | Configure baseline window; run full pipeline |
-| 6 · QC Plots | Raw, aligned, and group-mean timeseries with exclusion overlays |
-| 7 · Export | Download ZIP with all processed files |
+| Workflow step | What it does |
+|---------------|--------------|
+| Import | Upload DVC metric & event CSVs, or load bundled examples |
+| Validate | Detect groups, subjects, timestamps, native bin size, and parse warnings |
+| Metadata & Study Design | Edit study, subject, group, treatment schedule, and group assignment metadata |
+| Events, Alignment & Exclusions | Preview events, detect cage-change pairs, configure alignment and confound windows |
+| Baseline & Aggregation | Configure baseline window, optional group-mean imputation/overrides, and run the pipeline |
+| QC Plots | Review raw/aligned plots, baseline quality heatmap, irregular-bin report, and group means |
+| Export | Download a ZIP with processed data, config, metadata, reports, and optional analysis outputs |
+| Analysis | Generate exploratory circadian, binned, AUC, and quick-statistics summaries |
 
 ---
 
@@ -80,7 +81,16 @@ Known event values: `REMOVED`, `INSERTED`, `CAGE_OFFLINE`, `CAGE_ONLINE`.
 | `group_metadata.csv` | Group-level metadata with scientific labels |
 | `study_metadata.yaml` | Study-level metadata |
 | `event_metadata.csv` | Manually entered events (header only if unused) |
+| `treatment_schedule.csv` | Editable treatment/dosing schedule, when provided |
+| `facility_events.csv` | Facility-level confound calendar, when provided |
+| `daily_means.csv` | Group mean ± SEM by selected analysis time bin |
+| `circadian_summary.csv` | Cosinor MESOR, amplitude, acrophase, R2, and phase |
+| `light_dark_summary.csv` | Light/dark group summaries and dark/light ratio |
+| `quality_report.csv` | Per-subject/metric quality diagnostics |
+| `auc_summary.csv` | Per-animal trapezoidal AUC values for the selected window |
+| `stats_summary.csv` | Exploratory p-values, FDR q-values, effect sizes, labels, and statistical notes |
 | `analysis_config.yaml` | All parameters used for this run |
+| `manifest.yaml` | Input file hashes, row counts, selected config, and app version |
 | `processing_report.md` | Human-readable run summary |
 | `metadata_validation_report.md` | Metadata quality summary |
 
@@ -91,7 +101,8 @@ Known event values: `REMOVED`, `INSERTED`, `CAGE_OFFLINE`, `CAGE_ONLINE`.
 ```
 dvc-behavioral-preprocessing-workbench/
 ├── app/
-│   └── streamlit_app.py          # 7-tab Streamlit GUI
+│   ├── streamlit_app.py          # guided Streamlit GUI
+│   └── components/               # workflow and metadata editor components
 ├── src/
 │   └── dvc_behavior/
 │       ├── config.py             # Constants & defaults
@@ -104,8 +115,11 @@ dvc-behavioral-preprocessing-workbench/
 │       ├── alignment.py          # Temporal alignment
 │       ├── baseline.py           # Baseline calculation
 │       ├── aggregation.py        # Optional coarser binning
+│       ├── analysis.py           # Exploratory analysis helpers
+│       ├── api_adapter.py        # Future direct DVC API placeholder
 │       ├── qc.py                 # Plotly QC figures
 │       ├── export.py             # ZIP export builder
+│       ├── schemas.py            # Optional warn-only dataframe validation
 │       └── reporting.py          # Markdown report generator
 ├── tests/                        # pytest test suite
 ├── data/
@@ -123,8 +137,9 @@ dvc-behavioral-preprocessing-workbench/
 - **subject_id may be a cage label,** not necessarily a biological animal ID. Keep both `subject_id` (detected) and `animal_id` (user-defined) separate.
 - **Baseline is per subject and per metric.** Group-level baselines are not computed; group means are derived from individual subjects.
 - **Exclusions are traceable.** Every excluded row carries its reason in `exclusion_reason`. Excluded rows are retained in the output with `is_excluded=True`.
-- **No statistical inference.** This MVP produces tidy data for downstream analysis. No p-values, no group comparisons.
+- **Exploratory statistics only.** P-values and group comparisons in the app are orientation tools, not confirmatory inference.
 - **Light/dark annotation uses local time.** The user selects a timezone (default: `Europe/Paris`). ZT0 = lights-on time.
+- **Imputed baselines are flagged.** Group-mean baseline imputation is optional and sets `baseline_imputed=True`.
 
 ---
 
@@ -140,6 +155,10 @@ The exported `analysis_config.yaml` captures:
 - Baseline window and method
 - Aggregation bin size
 - App version and processing timestamp
+
+The exported `manifest.yaml` records input file names, sizes, SHA256 hashes,
+tracked table row counts, selected configuration, app version, and processing
+timestamp.
 
 ---
 
@@ -161,10 +180,11 @@ pytest --tb=short
 
 ---
 
-## Future work (not in MVP)
+## Current roadmap
 
-- DVC API adapter (placeholder module raises `NotImplementedError`)
-- Pandera schema validation
-- Statistical group comparison
-- Interactive exclusion drawing on the QC plot
-- Multi-metric dashboard
+The v0.2 roadmap in `TODO.md` focuses on:
+
+- Maintaining export provenance and file hashing as the reproducibility anchor
+- Expanding reusable data-quality diagnostics as new real-world failure modes appear
+- Keeping exploratory statistics clearly labelled with effect sizes and FDR correction
+- Strengthening smoke coverage around the app workflow

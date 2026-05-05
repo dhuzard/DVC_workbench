@@ -178,6 +178,67 @@ def test_quick_exploratory_stats_runs_nonparametric_comparison(monkeypatch):
     assert comparison["comparison"] == "A vs B"
     assert bool(comparison["scipy_available"]) is True
     assert comparison["p_value"] == 0.05
+    assert comparison["q_value"] == 0.05
+    assert comparison["effect_size_name"] == "rank-biserial"
+    assert comparison["effect_size"] == -1.0
+
+
+def test_quick_exploratory_stats_adds_kruskal_effect_size_and_fdr(monkeypatch):
+    import dvc_behavior.analysis as analysis
+
+    class FakeStats:
+        @staticmethod
+        def shapiro(values):
+            return 0.95, 0.5
+
+        @staticmethod
+        def kruskal(*groups):
+            first = list(groups[0])
+            if first == [1.0, 2.0, 3.0]:
+                return 7.0, 0.01
+            return 4.0, 0.04
+
+    monkeypatch.setattr(analysis, "_load_scipy_stats", lambda: FakeStats)
+    df = pd.DataFrame(
+        {
+            "group_id": ["A", "A", "A", "B", "B", "B", "C", "C", "C"] * 2,
+            "metric_name": ["activity"] * 9 + ["distance"] * 9,
+            "subject_id": ["A1", "A2", "A3", "B1", "B2", "B3", "C1", "C2", "C3"] * 2,
+            "value": [
+                1.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                6.0,
+                7.0,
+                8.0,
+                9.0,
+                2.0,
+                3.0,
+                4.0,
+                5.0,
+                6.0,
+                7.0,
+                8.0,
+                9.0,
+                10.0,
+            ],
+        }
+    )
+
+    out, warns = quick_exploratory_stats(df)
+
+    assert warns == []
+    comparisons = out[out["test"] == "Kruskal-Wallis"].sort_values("p_value")
+    activity = comparisons[comparisons["p_value"] == 0.01].iloc[0]
+    distance = comparisons[comparisons["p_value"] == 0.04].iloc[0]
+    assert activity["effect_size_name"] == "epsilon-squared"
+    assert np.isclose(activity["effect_size"], 5.0 / 6.0)
+    assert activity["q_value"] == 0.02
+    assert np.isclose(distance["effect_size"], 2.0 / 6.0)
+    assert distance["q_value"] == 0.04
+    assert out[out["test"] == "Shapiro-Wilk"]["q_value"].isna().all()
 
 
 def test_quick_exploratory_stats_graceful_without_scipy(monkeypatch):
@@ -198,3 +259,4 @@ def test_quick_exploratory_stats_graceful_without_scipy(monkeypatch):
     assert warns
     assert out["test"].iloc[0] == "scipy.stats unavailable"
     assert out["p_value"].isna().all()
+    assert out["q_value"].isna().all()

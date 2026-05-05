@@ -42,6 +42,8 @@ from dvc_behavior import (  # noqa: E402
     light_dark,
     metadata as meta_mod,
     parsing,
+    provenance,
+    quality,
     qc,
     reporting,
     schemas,
@@ -90,6 +92,7 @@ def _init_state() -> None:
         "analysis_tables": {},
         "analysis_figures": {},
         "analysis_warning": "",
+        "quality_report": None,
         # pipeline timestamp for cache-busting display
         "pipeline_run_ts": None,
         "export_zip_ready": False,
@@ -172,6 +175,7 @@ def _parse_all_files() -> None:
     st.session_state.processed_df = None  # invalidate downstream results
     st.session_state.exclusion_log = None
     st.session_state.baseline_summary = None
+    st.session_state.quality_report = None
     st.session_state.export_zip_ready = False
 
 
@@ -329,6 +333,11 @@ def _run_pipeline() -> None:
         warns.extend(agg_warns)
 
     st.session_state.processed_df = df
+    try:
+        st.session_state.quality_report = quality.build_quality_report(df)
+    except Exception as exc:
+        st.session_state.quality_report = None
+        warns.append(f"Quality report could not be built: {exc}")
     warns.extend(schemas.validate_dataframe(
         df,
         "processed_df",
@@ -1311,16 +1320,28 @@ def _tab_qc() -> None:
         return
 
     with st.expander("Data quality report", expanded=False):
-        irregular = qc.detect_irregular_bins(display_df)
-        if irregular.empty:
-            st.caption("No timestamp interval report available.")
+        quality_report = st.session_state.quality_report
+        if quality_report is None:
+            try:
+                quality_report = quality.build_quality_report(display_df)
+            except Exception:
+                quality_report = pd.DataFrame()
+        if quality_report.empty:
+            st.caption("No data-quality report available.")
         else:
-            flagged = irregular[irregular["irregular_bins"]]
+            flagged = quality_report[
+                quality_report["irregular_interval_flag"]
+                | quality_report["missing_value_count"].gt(0)
+                | quality_report["duplicate_timestamp_count"].gt(0)
+                | quality_report["long_gap_count"].gt(0)
+                | quality_report["negative_value_count"].gt(0)
+                | quality_report["zero_variance_flag"]
+            ]
             if flagged.empty:
-                st.success("No irregular subject/metric timestamp intervals detected.")
+                st.success("No subject/metric quality flags detected.")
             else:
-                st.warning(f"{len(flagged)} subject/metric stream(s) have irregular timestamp intervals.")
-            st.dataframe(irregular, width="stretch", hide_index=True)
+                st.warning(f"{len(flagged)} subject/metric stream(s) have quality flags.")
+            st.dataframe(quality_report, width="stretch", hide_index=True)
 
         if st.session_state.baseline_summary is not None and not st.session_state.baseline_summary.empty:
             st.plotly_chart(qc.plot_baseline_quality_heatmap(st.session_state.baseline_summary), width="stretch")
@@ -1422,6 +1443,30 @@ def _tab_export() -> None:
         baseline_cfg=bsl_cfg,
         aggregation_bin=st.session_state.aggregation_bin,
     )
+    quality_report = st.session_state.quality_report
+    if quality_report is None and proc is not None:
+        try:
+            quality_report = quality.build_quality_report(proc)
+        except Exception:
+            quality_report = pd.DataFrame()
+    analysis_tables_for_export = dict(st.session_state.analysis_tables)
+    if quality_report is not None and not quality_report.empty:
+        analysis_tables_for_export["quality_report.csv"] = quality_report
+
+    manifest = provenance.build_provenance_manifest(
+        input_files=st.session_state.metric_files + st.session_state.event_files,
+        selected_config=analysis_config,
+        tables={
+            "processed_timeseries": proc,
+            "baseline_summary": st.session_state.baseline_summary,
+            "exclusion_log": st.session_state.exclusion_log,
+            "event_table_clean": st.session_state.event_df,
+            "subject_metadata": st.session_state.subject_meta,
+            "group_metadata": st.session_state.group_meta,
+            "quality_report": quality_report,
+        },
+        app_version=cfg.APP_VERSION,
+    )
 
     # Generate reports
     proc_report = reporting.generate_processing_report(
@@ -1447,6 +1492,15 @@ def _tab_export() -> None:
     )
 
     # Preview processing report
+    st.subheader("Provenance summary")
+    st.write(
+        f"{len(manifest['input_files'])} input file(s), "
+        f"{sum(item['size_bytes'] for item in manifest['input_files']):,} input bytes, "
+        f"{len(manifest['row_counts'])} tracked output table(s)."
+    )
+    with st.expander("Input file hashes", expanded=False):
+        st.dataframe(pd.DataFrame(manifest["input_files"]), width="stretch", hide_index=True)
+
     st.subheader("Processing report preview")
     st.markdown(proc_report)
 
@@ -1467,8 +1521,9 @@ def _tab_export() -> None:
                 metadata_validation_report=meta_report,
                 treatment_schedule=st.session_state.treatment_schedule,
                 facility_events=st.session_state.facility_events,
-                analysis_tables=st.session_state.analysis_tables,
+                analysis_tables=analysis_tables_for_export,
                 figures=st.session_state.analysis_figures,
+                manifest=manifest,
             )
             if estimated_bytes > 500_000_000:
                 tmp_dir = Path(tempfile.mkdtemp(prefix="dvc_export_"))
@@ -1500,12 +1555,14 @@ def _tab_export() -> None:
         "daily_means.csv",
         "circadian_summary.csv",
         "light_dark_summary.csv",
+        "quality_report.csv",
         "auc_summary.csv",
         "stats_summary.csv",
         "figures/",
         "study_metadata.yaml",
         "event_metadata.csv",
         "analysis_config.yaml",
+        "manifest.yaml",
         "processing_report.md",
         "metadata_validation_report.md",
     ]:
@@ -1526,10 +1583,10 @@ def _tab_export() -> None:
                 and st.session_state.facility_events is not None
                 and not st.session_state.facility_events.empty
             )
-            or fname in st.session_state.analysis_tables
+            or fname in analysis_tables_for_export
             or (fname == "figures/" and bool(st.session_state.analysis_figures))
             or fname in ("study_metadata.yaml", "analysis_config.yaml", "processing_report.md",
-                         "metadata_validation_report.md", "event_metadata.csv")
+                         "metadata_validation_report.md", "event_metadata.csv", "manifest.yaml")
         )
         icon = "✓" if included else "–"
         st.write(f"{icon} `{fname}`")

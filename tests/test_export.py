@@ -177,6 +177,31 @@ class TestCreateExportZip:
         with zipfile.ZipFile(path) as zf:
             assert "processed_timeseries.csv" in zf.namelist()
 
+    def test_optional_manifest_included(self):
+        data = create_export_zip(
+            processed_df=None,
+            baseline_summary=None,
+            exclusion_log=None,
+            event_table=None,
+            subject_metadata=None,
+            group_metadata=None,
+            study_metadata={},
+            analysis_config=None,
+            processing_report=None,
+            metadata_validation_report=None,
+            manifest={
+                "app_version": "test-version",
+                "input_files": [{"name": "metric.csv", "size_bytes": 3, "sha256": "abc"}],
+                "row_counts": {"processed_timeseries": 0},
+            },
+        )
+
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            assert "manifest.yaml" in zf.namelist()
+            manifest = yaml.safe_load(zf.read("manifest.yaml"))
+        assert manifest["app_version"] == "test-version"
+        assert manifest["input_files"][0]["name"] == "metric.csv"
+
     def test_deterministic_output(self):
         """Same inputs → same ZIP content (modulo timestamp in YAML)."""
         data1 = self._default_zip()

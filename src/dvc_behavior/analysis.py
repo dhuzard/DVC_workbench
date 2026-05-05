@@ -419,8 +419,12 @@ def quick_exploratory_stats(
                     "n_groups": len(group_names),
                     "n_total": int(block[value_col].notna().sum()),
                     "statistic": np.nan,
+                    "effect_size": np.nan,
+                    "effect_size_name": None,
                     "p_value": np.nan,
                     "p_label": None,
+                    "q_value": np.nan,
+                    "q_label": None,
                     "scipy_available": False,
                     "exploratory": True,
                     "disclaimer": EXPLORATORY_STATS_DISCLAIMER,
@@ -453,8 +457,12 @@ def quick_exploratory_stats(
                     "n_groups": 1,
                     "n_total": int(len(arr)),
                     "statistic": float(stat) if pd.notna(stat) else np.nan,
+                    "effect_size": np.nan,
+                    "effect_size_name": None,
                     "p_value": float(p_value) if pd.notna(p_value) else np.nan,
                     "p_label": _p_label(p_value),
+                    "q_value": np.nan,
+                    "q_label": None,
                     "scipy_available": True,
                     "exploratory": True,
                     "disclaimer": EXPLORATORY_STATS_DISCLAIMER,
@@ -464,12 +472,18 @@ def quick_exploratory_stats(
         if len(group_arrays) == 2:
             stat, p_value = stats_mod.mannwhitneyu(group_arrays[0], group_arrays[1], alternative="two-sided")
             test_name = "Mann-Whitney U"
+            effect_size = _rank_biserial_from_u(stat, len(group_arrays[0]), len(group_arrays[1]))
+            effect_size_name = "rank-biserial"
         elif len(group_arrays) > 2:
             stat, p_value = stats_mod.kruskal(*group_arrays)
             test_name = "Kruskal-Wallis"
+            effect_size = _kruskal_epsilon_squared(stat, group_arrays)
+            effect_size_name = "epsilon-squared"
         else:
             stat = p_value = np.nan
             test_name = "group comparison skipped"
+            effect_size = np.nan
+            effect_size_name = None
 
         rows.append(
             {
@@ -480,15 +494,19 @@ def quick_exploratory_stats(
                 "n_groups": len(group_arrays),
                 "n_total": int(sum(len(arr) for arr in group_arrays)),
                 "statistic": float(stat) if pd.notna(stat) else np.nan,
+                "effect_size": effect_size,
+                "effect_size_name": effect_size_name,
                 "p_value": float(p_value) if pd.notna(p_value) else np.nan,
                 "p_label": _p_label(p_value),
+                "q_value": np.nan,
+                "q_label": None,
                 "scipy_available": True,
                 "exploratory": True,
                 "disclaimer": EXPLORATORY_STATS_DISCLAIMER,
             }
         )
 
-    return pd.DataFrame(rows), warns
+    return _add_fdr_q_values(pd.DataFrame(rows)), warns
 
 
 def _analysis_frame(df: pd.DataFrame, value_col: str, exclude_excluded: bool) -> pd.DataFrame:
@@ -710,6 +728,62 @@ def _subject_level_values(
     if subject_col in data.columns:
         keys.append(subject_col)
     return data.groupby(keys, dropna=False)[value_col].mean().reset_index()
+
+
+def _rank_biserial_from_u(u_statistic: float, n_left: int, n_right: int) -> float:
+    denominator = int(n_left) * int(n_right)
+    if denominator <= 0 or pd.isna(u_statistic):
+        return np.nan
+    return float(2.0 * float(u_statistic) / denominator - 1.0)
+
+
+def _kruskal_epsilon_squared(h_statistic: float, group_arrays: Sequence[np.ndarray]) -> float:
+    n_total = int(sum(len(arr) for arr in group_arrays))
+    n_groups = len(group_arrays)
+    if n_groups < 2 or n_total <= n_groups or pd.isna(h_statistic):
+        return np.nan
+    epsilon_squared = (float(h_statistic) - n_groups + 1.0) / (n_total - n_groups)
+    return float(np.clip(epsilon_squared, 0.0, 1.0))
+
+
+def _add_fdr_q_values(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    out = df.copy()
+    if "q_value" not in out.columns:
+        out["q_value"] = np.nan
+    if "q_label" not in out.columns:
+        out["q_label"] = None
+    if "p_value" not in out.columns or "n_groups" not in out.columns:
+        return out
+
+    p_values = pd.to_numeric(out["p_value"], errors="coerce")
+    n_groups = pd.to_numeric(out["n_groups"], errors="coerce")
+    comparison_mask = n_groups.ge(2) & np.isfinite(p_values)
+    if not comparison_mask.any():
+        return out
+
+    q_values = _benjamini_hochberg(p_values.loc[comparison_mask].to_numpy(dtype=float))
+    out.loc[comparison_mask, "q_value"] = q_values
+    out.loc[comparison_mask, "q_label"] = [_p_label(q) for q in q_values]
+    return out
+
+
+def _benjamini_hochberg(p_values: np.ndarray) -> np.ndarray:
+    if len(p_values) == 0:
+        return p_values
+
+    order = np.argsort(p_values)
+    ranked_p = p_values[order]
+    ranks = np.arange(1, len(ranked_p) + 1, dtype=float)
+    adjusted_ranked = ranked_p * len(ranked_p) / ranks
+    adjusted_ranked = np.minimum.accumulate(adjusted_ranked[::-1])[::-1]
+    adjusted_ranked = np.clip(adjusted_ranked, 0.0, 1.0)
+
+    adjusted = np.empty_like(adjusted_ranked)
+    adjusted[order] = adjusted_ranked
+    return adjusted
 
 
 def _p_label(p_value: float | None) -> str | None:

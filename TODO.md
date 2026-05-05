@@ -3,6 +3,36 @@
 **Last updated:** 2026-05-05  
 **Status:** Next iteration implemented. Remaining work should start from new user feedback or new TODO entries.
 
+## Strategic next steps — v0.2 hardening
+
+### Workstream A — Reproducibility & Provenance
+
+- [ ] Add an export manifest with input file hashes, row counts, config summary, and app/package versions.
+- [ ] Include `manifest.yaml` in every ZIP export.
+- [ ] Show provenance summary in the Export page before download.
+- [ ] Add tests for deterministic file hashing and manifest structure.
+
+### Workstream B — Data Quality Diagnostics
+
+- [ ] Add a reusable `quality.py` module for per-subject/metric QC tables.
+- [ ] Flag missing-value rate, duplicate timestamps, negative values, zero variance, long gaps, and irregular intervals.
+- [ ] Replace ad hoc QC interval reporting in the app with the reusable quality report.
+- [ ] Include `quality_report.csv` in the export ZIP.
+- [ ] Add tests for data-quality edge cases.
+
+### Workstream C — Analysis Confidence & Reporting
+
+- [ ] Add effect sizes to exploratory group comparisons.
+- [ ] Add Benjamini-Hochberg FDR q-values to exploratory statistics.
+- [ ] Include statistical method notes and effect-size columns in `stats_summary.csv`.
+- [ ] Add tests for effect sizes and FDR correction.
+
+### Workstream D — Product Readiness
+
+- [ ] Add a compact app smoke test for component imports and workflow config.
+- [ ] Add README documentation for the v0.2 QC, provenance, and statistics outputs.
+- [ ] Run full pytest and compile checks after integration.
+
 ## Implementation checklist
 
 ### Priority 1 — UX & guided workflow
