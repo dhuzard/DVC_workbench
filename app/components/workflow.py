@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+from textwrap import dedent
 from typing import Iterable
 
 import pandas as pd
@@ -156,7 +157,8 @@ def render_contextual_help(step_id: str) -> None:
 def render_progress_stepper(steps: Iterable[dict[str, str]]) -> None:
     """Render a vertical progress stepper with status badges."""
     st.markdown(
-        """
+        dedent(
+            """
         <style>
         .dvc-stepper { display: grid; gap: 0.45rem; margin-top: 0.35rem; }
         .dvc-step {
@@ -193,7 +195,8 @@ def render_progress_stepper(steps: Iterable[dict[str, str]]) -> None:
         .dvc-badge.ready { color: #9c5f10; }
         .dvc-badge.locked { color: #687385; }
         </style>
-        """,
+        """
+        ).strip(),
         unsafe_allow_html=True,
     )
 
@@ -204,7 +207,8 @@ def render_progress_stepper(steps: Iterable[dict[str, str]]) -> None:
         detail = escape(step.get("detail", ""))
         badge = escape(status)
         items.append(
-            f"""
+            dedent(
+                f"""
             <div class="dvc-step {status}">
                 <div class="dvc-step-title">
                     <span>{label}</span>
@@ -213,6 +217,7 @@ def render_progress_stepper(steps: Iterable[dict[str, str]]) -> None:
                 <div class="dvc-step-detail">{detail}</div>
             </div>
             """
+            ).strip()
         )
 
     st.markdown(f"<div class='dvc-stepper'>{''.join(items)}</div>", unsafe_allow_html=True)

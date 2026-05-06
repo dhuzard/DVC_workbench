@@ -7,6 +7,7 @@ Run with:  streamlit run app/streamlit_app.py
 from __future__ import annotations
 
 import io
+from difflib import SequenceMatcher
 import sys
 import tempfile
 from copy import deepcopy
@@ -16,6 +17,14 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
+_APP_DIR = Path(__file__).parent
+_ROOT = _APP_DIR.parent
+sys.path.insert(0, str(_APP_DIR))
+sys.path.insert(0, str(_ROOT / "src"))
+
 from components.metadata_tables import group_column_config, subject_column_config
 from components.workflow import (
     render_contextual_help,
@@ -23,12 +32,6 @@ from components.workflow import (
     render_output_glossary,
     render_progress_stepper,
 )
-
-# ---------------------------------------------------------------------------
-# Path setup
-# ---------------------------------------------------------------------------
-_ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(_ROOT / "src"))
 
 from dvc_behavior import (  # noqa: E402
     aggregation,
@@ -48,9 +51,7 @@ from dvc_behavior import (  # noqa: E402
     reporting,
     schemas,
 )
-from dvc_behavior.io import list_example_files  # noqa: E402
-
-_EXAMPLES_DIR = _ROOT / "data" / "examples"
+_NO_EVENT_FILE = "No event file"
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
@@ -93,6 +94,7 @@ def _init_state() -> None:
         "analysis_figures": {},
         "analysis_warning": "",
         "quality_report": None,
+        "raw_event_file_mapping": {},
         # pipeline timestamp for cache-busting display
         "pipeline_run_ts": None,
         "export_zip_ready": False,
@@ -136,11 +138,14 @@ def _parse_all_files() -> None:
             progress.progress(parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files")
 
     st.session_state.long_df = parsing.combine_long_dfs(long_dfs) if long_dfs else None
-    warns.extend(schemas.validate_dataframe(
-        st.session_state.long_df if st.session_state.long_df is not None else pd.DataFrame(),
-        "long_df",
-        enabled=bool(st.session_state.schema_validation_enabled),
-    ))
+    if st.session_state.schema_validation_enabled:
+        warns.extend(
+            schemas.validate_long_df(
+                st.session_state.long_df
+                if st.session_state.long_df is not None
+                else pd.DataFrame()
+            )
+        )
 
     # ---- event files ----
     ev_dfs: list[pd.DataFrame] = []
@@ -154,11 +159,14 @@ def _parse_all_files() -> None:
             progress.progress(parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files")
 
     st.session_state.event_df = ev_mod.combine_event_dfs(ev_dfs) if ev_dfs else None
-    warns.extend(schemas.validate_dataframe(
-        st.session_state.event_df if st.session_state.event_df is not None else pd.DataFrame(),
-        "event_df",
-        enabled=bool(st.session_state.schema_validation_enabled),
-    ))
+    if st.session_state.schema_validation_enabled:
+        warns.extend(
+            schemas.validate_event_df(
+                st.session_state.event_df
+                if st.session_state.event_df is not None
+                else pd.DataFrame()
+            )
+        )
     if progress:
         progress.empty()
 
@@ -338,11 +346,8 @@ def _run_pipeline() -> None:
     except Exception as exc:
         st.session_state.quality_report = None
         warns.append(f"Quality report could not be built: {exc}")
-    warns.extend(schemas.validate_dataframe(
-        df,
-        "processed_df",
-        enabled=bool(st.session_state.schema_validation_enabled),
-    ))
+    if st.session_state.schema_validation_enabled:
+        warns.extend(schemas.validate_processed_df(df))
     st.session_state.all_warnings = warns
     st.session_state.pipeline_run_ts = pd.Timestamp.now()
     st.session_state.analysis_tables = {}
@@ -495,11 +500,267 @@ def _file_status_card(label: str, name: str, n_bytes: int, extra: str = "") -> N
     """Render a single loaded-file status row."""
     kb = n_bytes / 1024
     size_str = f"{kb:,.0f} KB" if kb < 1024 else f"{kb/1024:,.1f} MB"
+    icon = {"Metric": "📈", "Events": "🗓️"}.get(label, "📄")
     st.markdown(
-        f"&nbsp;&nbsp;✅ **{label}** &nbsp;`{name}`&nbsp; "
+        f"&nbsp;&nbsp;{icon} **{label}** &nbsp;`{name}`&nbsp; "
         f"<span style='color:grey;font-size:0.85em'>{size_str}{' — ' + extra if extra else ''}</span>",
         unsafe_allow_html=True,
     )
+
+
+def _classify_file_role(name: str, selected_role: str) -> str:
+    """Classify an uploaded CSV as metric or event from filename hints."""
+    lower_name = name.lower()
+    if "events" in lower_name:
+        return "event"
+    if "animal_loc" in lower_name:
+        return "metric"
+    return selected_role
+
+
+def _split_uploaded_files(
+    uploaded_metrics: list[Any] | None,
+    uploaded_events: list[Any] | None,
+) -> tuple[list[tuple[str, bytes]], list[tuple[str, bytes]], list[str]]:
+    """Read uploaded files and auto-correct obvious metric/event mix-ups."""
+    metric_files: list[tuple[str, bytes]] = []
+    event_files: list[tuple[str, bytes]] = []
+    corrections: list[str] = []
+
+    for selected_role, uploads in (
+        ("metric", uploaded_metrics or []),
+        ("event", uploaded_events or []),
+    ):
+        for uploaded in uploads:
+            name = uploaded.name
+            inferred_role = _classify_file_role(name, selected_role)
+            if inferred_role != selected_role:
+                corrections.append(
+                    f"`{name}` was uploaded as {selected_role}, but its filename looks like "
+                    f"{inferred_role}; it was moved to {inferred_role} files."
+                )
+            target = event_files if inferred_role == "event" else metric_files
+            target.append((name, uploaded.read()))
+
+    return metric_files, event_files, corrections
+
+
+def _normalise_match_name(name: str) -> str:
+    """Return a compact filename token for metric/event pairing guesses."""
+    stem = Path(name).stem.lower()
+    for token in (
+        "events",
+        "metrics",
+        "event",
+        "activity",
+        "metric",
+        "animal",
+        "loc",
+        "index",
+        "smoothed",
+        "csv",
+    ):
+        stem = stem.replace(token, " ")
+    return " ".join(stem.replace("-", " ").replace("_", " ").split())
+
+
+def _guess_event_file_mapping(metric_names: list[str], event_names: list[str]) -> dict[str, str]:
+    """Guess metric-file to event-file mapping from filename similarity."""
+    if not event_names:
+        return {name: _NO_EVENT_FILE for name in metric_names}
+
+    normalised_events = {name: _normalise_match_name(name) for name in event_names}
+    mapping: dict[str, str] = {}
+    for metric_name in metric_names:
+        metric_key = _normalise_match_name(metric_name)
+        best_name = max(
+            event_names,
+            key=lambda event_name: SequenceMatcher(
+                None,
+                metric_key,
+                normalised_events[event_name],
+            ).ratio(),
+        )
+        mapping[metric_name] = best_name
+    return mapping
+
+
+def _sync_raw_event_file_mapping() -> None:
+    """Keep stored raw preview file mappings aligned with the loaded files."""
+    metric_names = [name for name, _ in st.session_state.metric_files]
+    event_names = [name for name, _ in st.session_state.event_files]
+    valid_event_choices = set(event_names) | {_NO_EVENT_FILE}
+    guessed = _guess_event_file_mapping(metric_names, event_names)
+    current = st.session_state.raw_event_file_mapping or {}
+
+    st.session_state.raw_event_file_mapping = {
+        metric_name: (
+            current[metric_name]
+            if metric_name in current and current[metric_name] in valid_event_choices
+            else guessed[metric_name]
+        )
+        for metric_name in metric_names
+    }
+
+
+def _add_event_overlay(
+    fig: Any,
+    event_df: pd.DataFrame,
+    *,
+    x_col: str,
+    y_value: float,
+) -> None:
+    """Overlay event timestamps on a raw Plotly time-series figure."""
+    if event_df.empty or x_col not in event_df.columns or "event_type" not in event_df.columns:
+        return
+
+    events_for_plot = event_df.dropna(subset=[x_col]).sort_values(x_col)
+    if events_for_plot.empty:
+        return
+
+    for event_type, type_df in events_for_plot.groupby("event_type", dropna=False):
+        fig.add_scatter(
+            x=type_df[x_col],
+            y=[y_value] * len(type_df),
+            mode="markers",
+            marker=dict(size=9, symbol="triangle-down", line=dict(width=1)),
+            name=f"Event: {event_type}",
+            text=type_df["event_type"],
+            hovertemplate="Event: %{text}<br>Time: %{x}<extra></extra>",
+        )
+    for ts in events_for_plot[x_col]:
+        fig.add_vline(x=ts, line_dash="dot", line_color="rgba(80,80,80,0.35)", line_width=1)
+
+
+def _render_raw_import_preview() -> None:
+    """Render metric/event file mapping controls and raw preview plot."""
+    long_df = st.session_state.long_df
+    event_df = st.session_state.event_df
+    if long_df is None or long_df.empty or "source_file" not in long_df.columns:
+        return
+
+    st.divider()
+    st.subheader("Raw data preview with events")
+    st.caption(
+        "Confirm which event file belongs with each activity/metric file before plotting."
+    )
+
+    _sync_raw_event_file_mapping()
+    metric_names = [name for name, _ in st.session_state.metric_files]
+    event_names = [name for name, _ in st.session_state.event_files]
+    event_choices = [_NO_EVENT_FILE] + event_names
+
+    mapping_rows = pd.DataFrame(
+        {
+            "metric_file": metric_names,
+            "event_file": [
+                st.session_state.raw_event_file_mapping.get(name, _NO_EVENT_FILE)
+                for name in metric_names
+            ],
+        }
+    )
+    edited_mapping = st.data_editor(
+        mapping_rows,
+        width="stretch",
+        hide_index=True,
+        disabled=["metric_file"],
+        column_config={
+            "metric_file": st.column_config.TextColumn(
+                "Activity/metric file",
+                help="Loaded metric CSV file.",
+            ),
+            "event_file": st.column_config.SelectboxColumn(
+                "Matching event file",
+                help="Confirm or correct the event CSV to overlay with this metric file.",
+                options=event_choices,
+                required=True,
+            ),
+        },
+        key="raw_event_mapping_editor",
+    )
+    st.session_state.raw_event_file_mapping = {
+        str(row["metric_file"]): str(row["event_file"])
+        for _, row in edited_mapping.iterrows()
+    }
+
+    source_options = [
+        name
+        for name in metric_names
+        if name in set(long_df["source_file"].dropna().astype(str))
+    ]
+    if not source_options:
+        return
+
+    c1, c2, c3 = st.columns([2, 2, 3])
+    with c1:
+        selected_source = st.selectbox(
+            "Activity file",
+            source_options,
+            key="raw_preview_metric_source",
+        )
+
+    source_df = long_df[long_df["source_file"] == selected_source].copy()
+    metric_options = (
+        sorted(source_df["metric_name"].dropna().unique().tolist())
+        if "metric_name" in source_df.columns
+        else []
+    )
+    subject_options = (
+        sorted(source_df["subject_id"].dropna().unique().tolist())
+        if "subject_id" in source_df.columns
+        else []
+    )
+    with c2:
+        selected_metric = st.selectbox(
+            "Metric",
+            metric_options,
+            key="raw_preview_metric_name",
+        ) if metric_options else None
+    with c3:
+        selected_subjects = st.multiselect(
+            "Subjects",
+            subject_options,
+            default=subject_options[:6],
+            key="raw_preview_subjects",
+        )
+
+    if not selected_metric:
+        st.info("No metric is available for the selected activity file.")
+        return
+
+    x_col = "timestamp_local" if "timestamp_local" in source_df.columns else "timestamp_utc"
+    fig = qc.plot_raw_timeseries(
+        source_df,
+        selected_metric,
+        subjects=selected_subjects if selected_subjects else None,
+        x_col=x_col,
+        show_exclusions=False,
+    )
+
+    mapped_event_file = st.session_state.raw_event_file_mapping.get(
+        selected_source,
+        _NO_EVENT_FILE,
+    )
+    if (
+        mapped_event_file != _NO_EVENT_FILE
+        and event_df is not None
+        and not event_df.empty
+        and "source_file" in event_df.columns
+    ):
+        mapped_events = event_df[event_df["source_file"] == mapped_event_file].copy()
+        event_x_col = x_col if x_col in mapped_events.columns else "timestamp_utc"
+        y_max = pd.to_numeric(
+            source_df.loc[source_df["metric_name"] == selected_metric, "value"],
+            errors="coerce",
+        ).max()
+        if pd.notna(y_max):
+            _add_event_overlay(fig, mapped_events, x_col=event_x_col, y_value=float(y_max))
+        n_events = int(mapped_events[event_x_col].notna().sum())
+        st.caption(f"Overlaying {n_events:,} events from `{mapped_event_file}`.")
+    else:
+        st.caption("No event file is mapped for this activity file.")
+
+    st.plotly_chart(fig, width="stretch")
 
 
 def _render_load_status() -> None:
@@ -540,6 +801,8 @@ def _render_load_status() -> None:
             _file_status_card("Events", name, len(data), extra)
     else:
         st.caption("No event files loaded — exclusion and event-based alignment will be skipped.")
+
+    _render_raw_import_preview()
 
     # ---- Pipeline stage tracker ----
     st.divider()
@@ -633,51 +896,33 @@ def _tab_import() -> None:
             key="upload_event",
         )
 
-    # Load examples button
-    st.divider()
-    st.subheader("Or load bundled example files")
-    example_files = list_example_files(_EXAMPLES_DIR)
-    col_ex1, col_ex2 = st.columns(2)
-    with col_ex1:
-        if example_files["metric"]:
-            st.write("**Available metric examples:**")
-            for p in example_files["metric"]:
-                st.write(f"- `{p.name}`")
-    with col_ex2:
-        if example_files["event"]:
-            st.write("**Available event examples:**")
-            for p in example_files["event"]:
-                st.write(f"- `{p.name}`")
-
-    load_examples = st.button("Load example files", type="secondary")
-
     # ---- Build file list ----
-    if load_examples:
-        metric_files = [(p.name, p.read_bytes()) for p in example_files["metric"]]
-        event_files = [(p.name, p.read_bytes()) for p in example_files["event"]]
-        st.session_state.metric_files = metric_files
-        st.session_state.event_files = event_files
-        # Reset subject/group meta so templates are rebuilt
-        st.session_state.subject_meta = None
-        st.session_state.group_meta = None
-        _parse_all_files()
-        st.success(
-            f"Loaded {len(metric_files)} metric file(s) and {len(event_files)} event file(s)."
+    if uploaded_metrics or uploaded_events:
+        metric_files, event_files, corrections = _split_uploaded_files(
+            uploaded_metrics,
+            uploaded_events,
         )
-    elif uploaded_metrics or uploaded_events:
-        # Compare by name only — avoids reading bytes twice and is fast enough
-        new_metric_names = sorted(f.name for f in (uploaded_metrics or []))
+        # Compare by corrected name lists only; file bytes are already read above.
+        new_metric_names = sorted(name for name, _ in metric_files)
         old_metric_names = sorted(name for name, _ in st.session_state.metric_files)
-        new_event_names = sorted(f.name for f in (uploaded_events or []))
+        new_event_names = sorted(name for name, _ in event_files)
         old_event_names = sorted(name for name, _ in st.session_state.event_files)
 
         changed = new_metric_names != old_metric_names or new_event_names != old_event_names
         if changed:
-            st.session_state.metric_files = [(f.name, f.read()) for f in (uploaded_metrics or [])]
-            st.session_state.event_files = [(f.name, f.read()) for f in (uploaded_events or [])]
+            st.session_state.metric_files = metric_files
+            st.session_state.event_files = event_files
+            st.session_state.raw_event_file_mapping = {}
             st.session_state.subject_meta = None
             st.session_state.group_meta = None
             _parse_all_files()
+        if corrections:
+            st.warning(
+                "File type auto-correction applied. Please confirm the loaded files and "
+                "activity/event mapping below."
+            )
+            for correction in corrections:
+                st.caption(correction)
 
     # ---- Loading status panel ----
     st.divider()

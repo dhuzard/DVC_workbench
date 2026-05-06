@@ -31,6 +31,21 @@ _PROCESSED_REQUIRED = _LONG_REQUIRED | {
     "exclusion_reason",
 }
 
+def validate_dataframe(
+    df: pd.DataFrame,
+    name: str,
+    *,
+    enabled: bool = True,
+) -> list[str]:
+    """Validate a known DataFrame by name and return warnings only."""
+    if not enabled:
+        return []
+
+    validator = _VALIDATORS.get(name)
+    if validator is None:
+        return [f"{name}: no schema validator is registered."]
+    return validator(df)
+
 
 def validate_long_df(df: pd.DataFrame) -> list[str]:
     """Validate parsed metric output and return warnings only."""
@@ -45,6 +60,13 @@ def validate_event_df(df: pd.DataFrame) -> list[str]:
 def validate_processed_df(df: pd.DataFrame) -> list[str]:
     """Validate pipeline output and return warnings only."""
     return _validate(df, "processed_df", _PROCESSED_REQUIRED, _processed_schema)
+
+
+_VALIDATORS = {
+    "long_df": validate_long_df,
+    "event_df": validate_event_df,
+    "processed_df": validate_processed_df,
+}
 
 
 def _validate(
