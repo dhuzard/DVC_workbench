@@ -49,25 +49,38 @@ WORKFLOW_HELP: dict[str, dict[str, object]] = {
     "events": {
         "title": "Events, Alignment & Exclusions",
         "body": (
-            "Choose the experimental anchor used for relative time, then configure event windows "
-            "that should be excluded or flagged."
+            "Alignment creates a common time-zero anchor so animals can be compared relative "
+            "to the same experimental moment. After alignment, each row gets "
+            "`time_from_event_hours`: negative values are before the anchor, 0 is the anchor, "
+            "and positive values are after. Event-based alignment uses timestamps from the "
+            "event table; manual alignment uses one global timestamp for all subjects. "
+            "Exclusion rules then flag periods around events that should be ignored or reviewed."
         ),
         "checks": [
-            "Use subject scope when each subject has its own event timestamp.",
-            "Use a fallback timestamp when some subjects lack the selected event.",
+            "Use Event-based when the event file contains the biological or experimental anchor, such as treatment, surgery, REMOVED, or INSERTED.",
+            "Use Manual global timestamp when all subjects share one anchor or when no event file is available.",
+            "Use subject scope when each subject/cage has its own event timestamp; use group scope when one event applies to the group.",
+            "Use a fallback timestamp when some subjects lack the selected event; it is only used for missing anchors.",
             "Excluded rows remain in the output with exclusion flags.",
         ],
     },
     "baseline": {
-        "title": "Baseline & Aggregation",
+        "title": "Baseline, Aggregation & Pipeline",
         "body": (
-            "Set the baseline window relative to the alignment event, choose the minimum data "
-            "coverage, optionally aggregate, and run the preprocessing pipeline."
+            "Baseline defines a pre-event reference window for each subject and metric, such "
+            "as -72 h to -24 h before alignment. The pipeline computes a baseline value from "
+            "that window, then can export raw-minus-baseline and percent-change-from-baseline "
+            "columns. Aggregation optionally combines smaller time bins into larger bins, "
+            "for example 1-minute data into 1-hour data, to reduce noise and file size. "
+            "Baseline requires alignment; aggregation does not."
         ),
         "checks": [
-            "Baseline windows need alignment columns.",
-            "Flagged rows can be excluded from baseline statistics.",
-            "Aggregation changes the exported time resolution.",
+            "Baseline windows require alignment because the window is defined relative to time zero.",
+            "If alignment is disabled, baseline controls are hidden and baseline columns stay empty.",
+            "Choose a baseline window before the intervention or event, where behavior should represent the subject's normal pre-event level.",
+            "Minimum coverage controls how much data must exist in the window before a baseline is considered valid.",
+            "Flagged or excluded rows can be left out of baseline statistics.",
+            "Aggregation smooths plots and reduces export size, but larger bins remove short-term detail.",
         ],
     },
     "qc": {

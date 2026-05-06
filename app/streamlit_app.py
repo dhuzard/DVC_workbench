@@ -7,6 +7,7 @@ Run with:  streamlit run app/streamlit_app.py
 from __future__ import annotations
 
 import io
+from contextlib import contextmanager
 from difflib import SequenceMatcher
 import sys
 import tempfile
@@ -15,7 +16,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -52,6 +55,20 @@ from dvc_behavior import (  # noqa: E402
     schemas,
 )
 _NO_EVENT_FILE = "No event file"
+
+
+@contextmanager
+def _working_status(title: str, detail: str):
+    """Show a short, consistent visual status while app work is running."""
+    status = st.status(title, expanded=True)
+    status.write(detail)
+    try:
+        yield
+    except Exception:
+        status.update(label=f"{title} failed", state="error", expanded=True)
+        raise
+    else:
+        status.update(label=f"{title} complete", state="complete", expanded=False)
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
@@ -95,6 +112,9 @@ def _init_state() -> None:
         "analysis_warning": "",
         "quality_report": None,
         "raw_event_file_mapping": {},
+        "raw_preview_plot_requested": False,
+        "raw_preview_plot_settings": {},
+        "scroll_to_top": False,
         # pipeline timestamp for cache-busting display
         "pipeline_run_ts": None,
         "export_zip_ready": False,
@@ -220,6 +240,26 @@ def _facility_events_as_event_df(facility_events: pd.DataFrame | None) -> pd.Dat
     return pd.DataFrame(rows)
 
 
+def _alignment_is_configured() -> bool:
+    aln_cfg = st.session_state.alignment_cfg
+    return bool(aln_cfg.get("event_type") or aln_cfg.get("fallback_timestamp"))
+
+
+def _add_empty_baseline_columns(df: pd.DataFrame) -> None:
+    for col in (
+        "baseline_value",
+        "baseline_n_bins",
+        "baseline_expected_bins",
+        "baseline_coverage",
+        "baseline_valid",
+        "baseline_imputed",
+        "baseline_override",
+        "baseline_corrected_value",
+        "baseline_percent_change",
+    ):
+        df[col] = pd.NA
+
+
 # ---------------------------------------------------------------------------
 # Full preprocessing pipeline
 # ---------------------------------------------------------------------------
@@ -233,7 +273,7 @@ def _run_pipeline() -> None:
       2. Localise timestamps + annotate light/dark
       3. Apply exclusions
       4. Align to event
-      5. Compute baseline
+      5. Compute baseline when alignment is configured
       6. (optional) aggregate
     """
     long_df = st.session_state.long_df
@@ -319,20 +359,24 @@ def _run_pipeline() -> None:
         ):
             df[col] = None
 
-    # 5. Baseline
-    bsl_cfg = st.session_state.baseline_cfg
-    df, bsl_summary, bsl_warns = baseline.compute_baseline(
-        df,
-        start_hours=float(bsl_cfg.get("start_hours", -72)),
-        end_hours=float(bsl_cfg.get("end_hours", -24)),
-        method=bsl_cfg.get("method", "mean"),
-        exclude_excluded=bool(bsl_cfg.get("exclude_excluded", True)),
-        min_coverage=float(bsl_cfg.get("min_coverage", 0.7)),
-        impute_from_group_mean=bool(bsl_cfg.get("impute_from_group_mean", False)),
-        baseline_overrides=st.session_state.baseline_overrides,
-    )
-    warns.extend(bsl_warns)
-    st.session_state.baseline_summary = bsl_summary
+    # 5. Baseline (requires an alignment anchor)
+    if event_type or fallback_ts:
+        bsl_cfg = st.session_state.baseline_cfg
+        df, bsl_summary, bsl_warns = baseline.compute_baseline(
+            df,
+            start_hours=float(bsl_cfg.get("start_hours", -72)),
+            end_hours=float(bsl_cfg.get("end_hours", -24)),
+            method=bsl_cfg.get("method", "mean"),
+            exclude_excluded=bool(bsl_cfg.get("exclude_excluded", True)),
+            min_coverage=float(bsl_cfg.get("min_coverage", 0.7)),
+            impute_from_group_mean=bool(bsl_cfg.get("impute_from_group_mean", False)),
+            baseline_overrides=st.session_state.baseline_overrides,
+        )
+        warns.extend(bsl_warns)
+        st.session_state.baseline_summary = bsl_summary
+    else:
+        _add_empty_baseline_columns(df)
+        st.session_state.baseline_summary = pd.DataFrame()
 
     # 6. (optional) aggregation
     bin_s = st.session_state.aggregation_bin
@@ -441,11 +485,13 @@ def _workflow_steps() -> list[dict[str, str]]:
             ),
         },
         {
-            "label": "5. Baseline & Pipeline",
+            "label": "5. Baseline, Aggregation & Pipeline",
             "status": _status(has_processed, has_metric),
             "detail": (
                 "Pipeline complete; baseline summary available."
                 if has_processed and has_baseline
+                else "Pipeline complete; baseline skipped because alignment is disabled."
+                if has_processed and not has_alignment_cfg
                 else "Run preprocessing after baseline settings are reviewed."
             ),
         },
@@ -481,15 +527,70 @@ def _render_sidebar() -> str:
         steps = _workflow_steps()
         render_progress_stepper(steps)
         st.divider()
-        labels = [
-            f"{'✓' if step['status'] == 'done' else '!' if step['status'] == 'ready' else '🔒'} {step['label']}"
-            for step in steps
-        ]
-        choice = st.radio("Go to step", labels, key="workflow_step_choice")
-        selected = steps[labels.index(choice)]
+        step_by_label = {step["label"]: step for step in steps}
+        step_labels = list(step_by_label)
+        if st.session_state.get("workflow_step_label_choice") not in step_by_label:
+            st.session_state.workflow_step_label_choice = step_labels[0]
+        choice = st.radio(
+            "Go to step",
+            step_labels,
+            key="workflow_step_label_choice",
+            format_func=lambda label: _workflow_step_radio_label(step_by_label[label]),
+        )
+        selected = step_by_label[choice]
         if selected["status"] == "locked":
             st.warning("This step is locked until the earlier required workflow state exists.")
         return selected["label"]
+
+
+def _workflow_step_radio_label(step: dict[str, str]) -> str:
+    icon = "✓" if step["status"] == "done" else "!" if step["status"] == "ready" else "🔒"
+    return f"{icon} {step['label']}"
+
+
+def _go_to_workflow_step(step_label: str) -> None:
+    st.session_state.workflow_step_label_choice = step_label
+    st.session_state.scroll_to_top = True
+
+
+def _scroll_to_top_once() -> None:
+    if not st.session_state.get("scroll_to_top", False):
+        return
+    st.session_state.scroll_to_top = False
+    components.html(
+        """
+        <script>
+        const streamlitDoc = window.parent.document;
+        const scrollTarget = streamlitDoc.querySelector('section.main');
+        if (scrollTarget) {
+            scrollTarget.scrollTo({ top: 0, behavior: 'auto' });
+        }
+        window.parent.scrollTo({ top: 0, behavior: 'auto' });
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _render_next_step_button(current_step_label: str) -> None:
+    steps = _workflow_steps()
+    current_idx = next(
+        (idx for idx, step in enumerate(steps) if step["label"] == current_step_label),
+        None,
+    )
+    if current_idx is None or current_idx >= len(steps) - 1:
+        return
+
+    next_step = steps[current_idx + 1]
+
+    st.divider()
+    st.button(
+        f"Go to Next Step: {next_step['label']}",
+        type="primary",
+        disabled=next_step["status"] == "locked",
+        on_click=_go_to_workflow_step,
+        args=(next_step["label"],),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -632,6 +733,296 @@ def _add_event_overlay(
         fig.add_vline(x=ts, line_dash="dot", line_color="rgba(80,80,80,0.35)", line_width=1)
 
 
+def _alignment_preview_table(
+    long_df: pd.DataFrame | None,
+    event_df: pd.DataFrame | None,
+    *,
+    event_type: str | None,
+    scope: str,
+    fallback_timestamp: str | None,
+) -> pd.DataFrame:
+    """Build a compact preview of per-subject alignment anchors."""
+    if long_df is None or long_df.empty or "subject_id" not in long_df.columns:
+        return pd.DataFrame()
+
+    pairs = long_df[["subject_id", "group_id"]].drop_duplicates().copy()
+    rows: list[dict[str, Any]] = []
+    fallback_ts = pd.to_datetime(fallback_timestamp, utc=True, errors="coerce") if fallback_timestamp else pd.NaT
+    events = event_df if event_df is not None else pd.DataFrame()
+
+    for _, pair in pairs.iterrows():
+        subject_id = str(pair["subject_id"])
+        group_id = str(pair.get("group_id", ""))
+        source = "missing"
+        anchor = pd.NaT
+
+        if event_type and not events.empty and "event_type" in events.columns:
+            event_mask = events["event_type"] == event_type
+            if scope == "subject" and "subject_id" in events.columns:
+                candidates = events.loc[
+                    event_mask & (events["subject_id"].astype(str) == subject_id),
+                    "timestamp_utc",
+                ]
+                source = "subject event"
+                if candidates.empty and "group_id" in events.columns:
+                    candidates = events.loc[
+                        event_mask & (events["group_id"].astype(str) == group_id),
+                        "timestamp_utc",
+                    ]
+                    source = "group event fallback"
+            elif "group_id" in events.columns:
+                candidates = events.loc[
+                    event_mask & (events["group_id"].astype(str) == group_id),
+                    "timestamp_utc",
+                ]
+                source = "group event"
+            else:
+                candidates = pd.Series(dtype="datetime64[ns, UTC]")
+
+            candidates = pd.to_datetime(candidates, utc=True, errors="coerce").dropna()
+            if not candidates.empty:
+                anchor = candidates.iloc[0]
+
+        if pd.isna(anchor) and not pd.isna(fallback_ts):
+            anchor = fallback_ts
+            source = "manual fallback"
+
+        rows.append(
+            {
+                "subject_id": subject_id,
+                "group_id": group_id,
+                "alignment_timestamp": anchor if not pd.isna(anchor) else "",
+                "source": source,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _pipeline_run_summary() -> list[str]:
+    """Describe what the current pipeline configuration will do."""
+    summary: list[str] = []
+
+    event_df = st.session_state.event_df
+    if event_df is not None and not event_df.empty:
+        event_counts = event_df["event_type"].value_counts().head(6)
+        event_text = ", ".join(f"{event_type}: {count}" for event_type, count in event_counts.items())
+        summary.append(
+            f"Events: {len(event_df):,} event rows are loaded. The most frequent event types are {event_text}."
+        )
+    else:
+        summary.append(
+            "Events: no event file is loaded. Event-based exclusions and event-based alignment will be skipped unless a manual alignment timestamp is set."
+        )
+
+    active_rules = [
+        (
+            event_type,
+            rule,
+        )
+        for event_type, rule in st.session_state.exclusion_rules.items()
+        if rule.get("exclude") or rule.get("flag")
+    ]
+    if active_rules:
+        rule_text = "; ".join(
+            (
+                f"{event_type}: {rule.get('before_hours', 0):g} h before, "
+                f"{rule.get('after_hours', 0):g} h after"
+                f"{' excluded' if rule.get('exclude') else ''}"
+                f"{' flagged' if rule.get('flag') else ''}"
+            )
+            for event_type, rule in active_rules
+        )
+        summary.append(f"Exclusions: matching rows around configured events will be marked using these rules: {rule_text}.")
+    else:
+        summary.append("Exclusions: no event exclusion or flagging rules are active.")
+
+    aln = st.session_state.alignment_cfg
+    event_type = aln.get("event_type")
+    fallback = aln.get("fallback_timestamp")
+    if event_type:
+        summary.append(
+            f"Alignment: rows will be aligned to the first `{event_type}` event using `{aln.get('scope', 'subject')}` scope. "
+            f"The app will create `time_from_event_hours`, where 0 is `{aln.get('label', 'J0')}`."
+            + (f" Missing anchors will use fallback `{fallback}`." if fallback else "")
+        )
+    elif fallback:
+        summary.append(
+            f"Alignment: all rows will be aligned to the manual global timestamp `{fallback}`. "
+            f"The app will create `time_from_event_hours`, where 0 is `{aln.get('label', 'J0')}`."
+        )
+    else:
+        summary.append(
+            "Alignment: disabled. No `time_from_event_hours` anchor will be created, so baseline and aligned plots may be unavailable."
+        )
+
+    bsl = st.session_state.baseline_cfg
+    if event_type or fallback:
+        summary.append(
+            f"Baseline: for each subject and metric, baseline will be computed from {float(bsl.get('start_hours', -72)):g} h "
+            f"to {float(bsl.get('end_hours', -24)):g} h relative to alignment. "
+            f"At least {float(bsl.get('min_coverage', 0.7)):.0%} coverage is required. "
+            f"Excluded rows {'will' if bsl.get('exclude_excluded', True) else 'will not'} be removed from baseline calculations. "
+            f"Invalid baselines {'will' if bsl.get('impute_from_group_mean', False) else 'will not'} be imputed from group means."
+        )
+    else:
+        summary.append("Baseline: skipped unless alignment is configured, because the baseline window is relative to time zero.")
+
+    aggregation_bin = st.session_state.aggregation_bin
+    if aggregation_bin is None:
+        summary.append("Aggregation: disabled. The processed output will keep the native time resolution.")
+    else:
+        summary.append(
+            f"Aggregation: after preprocessing, rows will be combined into {aggregation_bin:g}-second bins to reduce noise and output size."
+        )
+
+    return summary
+
+
+def _decimal_time(time_text: str, default: float) -> float:
+    try:
+        parts = str(time_text).split(":")
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        return hour + minute / 60.0
+    except Exception:
+        return default
+
+
+def _dark_onset_zt() -> float:
+    light_on_h = _decimal_time(st.session_state.light_on, 7.0)
+    light_off_h = _decimal_time(st.session_state.light_off, 19.0)
+    return (light_off_h - light_on_h) % 24.0
+
+
+def _circadian_profile(
+    df: pd.DataFrame,
+    *,
+    value_col: str,
+    max_days: int,
+    zt_bin_hours: float,
+    normalize_mode: str,
+) -> pd.DataFrame:
+    required = {"zeitgeber_time_hours", "timestamp_local", "subject_id", value_col}
+    if df.empty or not required <= set(df.columns):
+        return pd.DataFrame()
+
+    data = df.copy()
+    data["timestamp_local"] = pd.to_datetime(data["timestamp_local"], errors="coerce")
+    data["zeitgeber_time_hours"] = pd.to_numeric(data["zeitgeber_time_hours"], errors="coerce") % 24.0
+    data[value_col] = pd.to_numeric(data[value_col], errors="coerce")
+    data = data.dropna(subset=["timestamp_local", "zeitgeber_time_hours", "subject_id", value_col])
+    if data.empty:
+        return pd.DataFrame()
+
+    first_day = data["timestamp_local"].dt.normalize().min()
+    data["_analysis_day"] = (data["timestamp_local"].dt.normalize() - first_day).dt.days + 1
+    data = data[(data["_analysis_day"] >= 1) & (data["_analysis_day"] <= max_days)].copy()
+    if data.empty:
+        return pd.DataFrame()
+
+    label_col = "group_label" if "group_label" in data.columns else "group_id"
+    if label_col not in data.columns:
+        data[label_col] = "All"
+    data["_zt_bin"] = (data["zeitgeber_time_hours"] // zt_bin_hours) * zt_bin_hours
+
+    if normalize_mode != "Raw values":
+        dark_onset = _dark_onset_zt()
+        norm_keys = [label_col, "subject_id", "_analysis_day"]
+        if normalize_mode == "Normalize to 24 h max":
+            denom = data.groupby(norm_keys, dropna=False)[value_col].transform("max")
+        else:
+            window_end = (dark_onset + 3.0) % 24.0
+            if window_end > dark_onset:
+                in_window = data["zeitgeber_time_hours"].between(dark_onset, window_end, inclusive="left")
+            else:
+                in_window = (data["zeitgeber_time_hours"] >= dark_onset) | (
+                    data["zeitgeber_time_hours"] < window_end
+                )
+            max_lookup = (
+                data.loc[in_window]
+                .groupby(norm_keys, dropna=False)[value_col]
+                .max()
+                .rename("_norm_denom")
+            )
+            data = data.merge(max_lookup, on=norm_keys, how="left")
+            denom = data["_norm_denom"]
+        data[value_col] = data[value_col] / denom.where(denom != 0)
+
+    subject_profile = (
+        data.groupby([label_col, "subject_id", "_analysis_day", "_zt_bin"], dropna=False)[value_col]
+        .mean()
+        .reset_index(name="subject_mean")
+    )
+    summary = (
+        subject_profile.groupby([label_col, "_zt_bin"], dropna=False)["subject_mean"]
+        .agg(mean="mean", sd=lambda s: s.std(ddof=1), n="count")
+        .reset_index()
+        .rename(columns={label_col: "group_label", "_zt_bin": "zeitgeber_time_hours"})
+    )
+    summary["sem"] = summary.apply(
+        lambda row: row["sd"] / (row["n"] ** 0.5) if row["n"] > 1 else 0.0,
+        axis=1,
+    )
+    summary["max_days"] = max_days
+    summary["normalization"] = normalize_mode
+    return summary
+
+
+def _plot_circadian_profile(profile: pd.DataFrame, *, value_label: str) -> go.Figure:
+    fig = go.Figure()
+    dark_onset = _dark_onset_zt()
+    fig.add_vrect(
+        x0=dark_onset,
+        x1=24,
+        fillcolor="rgba(25, 25, 35, 0.18)",
+        layer="below",
+        line_width=0,
+        annotation_text="Dark phase",
+        annotation_position="top left",
+    )
+
+    if profile.empty:
+        fig.update_layout(title="No circadian profile data available.", template="plotly_white")
+        return fig
+
+    for group_label, group_df in profile.groupby("group_label", dropna=False):
+        group_df = group_df.sort_values("zeitgeber_time_hours")
+        x = group_df["zeitgeber_time_hours"]
+        mean = group_df["mean"]
+        sem = group_df["sem"].fillna(0)
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=mean,
+                mode="lines+markers",
+                name=str(group_label),
+                line=dict(width=2),
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=pd.concat([x, x.iloc[::-1]]),
+                y=pd.concat([mean + sem, (mean - sem).iloc[::-1]]),
+                fill="toself",
+                line=dict(color="rgba(0,0,0,0)"),
+                hoverinfo="skip",
+                showlegend=False,
+                name=f"{group_label} SEM",
+            )
+        )
+
+    fig.update_layout(
+        title="Circadian rhythm profile",
+        xaxis_title="Zeitgeber time (hours from lights on)",
+        yaxis_title=value_label,
+        xaxis=dict(range=[0, 24], dtick=3),
+        hovermode="x unified",
+        template="plotly_white",
+    )
+    return fig
+
+
 def _render_raw_import_preview() -> None:
     """Render metric/event file mapping controls and raw preview plot."""
     long_df = st.session_state.long_df
@@ -728,14 +1119,36 @@ def _render_raw_import_preview() -> None:
         st.info("No metric is available for the selected activity file.")
         return
 
+    selected_subjects_key = tuple(selected_subjects)
+    plot_settings = {
+        "source": selected_source,
+        "metric": selected_metric,
+        "subjects": selected_subjects_key,
+        "event_file": st.session_state.raw_event_file_mapping.get(selected_source, _NO_EVENT_FILE),
+    }
+    if st.button("Plot raw data with events", type="primary", key="raw_preview_plot_button"):
+        st.session_state.raw_preview_plot_requested = True
+        st.session_state.raw_preview_plot_settings = plot_settings
+
+    if (
+        not st.session_state.raw_preview_plot_requested
+        or st.session_state.raw_preview_plot_settings != plot_settings
+    ):
+        st.caption("Click Plot raw data with events to generate this preview.")
+        return
+
     x_col = "timestamp_local" if "timestamp_local" in source_df.columns else "timestamp_utc"
-    fig = qc.plot_raw_timeseries(
-        source_df,
-        selected_metric,
-        subjects=selected_subjects if selected_subjects else None,
-        x_col=x_col,
-        show_exclusions=False,
-    )
+    with _working_status(
+        "Drawing raw preview",
+        "The app is plotting the selected activity file and preparing mapped event markers.",
+    ):
+        fig = qc.plot_raw_timeseries(
+            source_df,
+            selected_metric,
+            subjects=selected_subjects if selected_subjects else None,
+            x_col=x_col,
+            show_exclusions=False,
+        )
 
     mapped_event_file = st.session_state.raw_event_file_mapping.get(
         selected_source,
@@ -913,9 +1326,18 @@ def _tab_import() -> None:
             st.session_state.metric_files = metric_files
             st.session_state.event_files = event_files
             st.session_state.raw_event_file_mapping = {}
+            st.session_state.raw_preview_plot_requested = False
+            st.session_state.raw_preview_plot_settings = {}
             st.session_state.subject_meta = None
             st.session_state.group_meta = None
-            _parse_all_files()
+            with _working_status(
+                "Reading uploaded files",
+                (
+                    "The app is classifying activity and event CSVs, parsing timestamps, "
+                    "combining metric rows, and preparing metadata templates."
+                ),
+            ):
+                _parse_all_files()
         if corrections:
             st.warning(
                 "File type auto-correction applied. Please confirm the loaded files and "
@@ -1321,6 +1743,22 @@ def _tab_events() -> None:
 
     # ---- Alignment configuration ----
     st.subheader("Alignment")
+    st.write(
+        "Alignment defines the time-zero anchor used later for baseline windows, "
+        "event-centered plots, and exported `time_from_event` columns. After alignment, "
+        "each raw timestamp is converted into hours relative to the selected anchor: "
+        "negative values are before the anchor, 0 is the anchor, and positive values are after."
+    )
+    with st.expander("How to fill this section", expanded=True):
+        st.markdown(
+            """
+            - Use **Event-based** when the event file contains the experimental anchor, such as treatment, surgery, REMOVED, INSERTED, or another recorded event.
+            - Use **Manual global timestamp** when every subject should share the same anchor timestamp, or when no event file is available.
+            - Use **Disabled** only if you do not need baseline windows or aligned plots.
+            - Choose **subject scope** when each cage/animal has its own event timestamp. Choose **group scope** when one event timestamp applies to all subjects in a group.
+            - Fill the fallback timestamp when some subjects may not have the selected event; the fallback is used only for missing anchors.
+            """
+        )
     aln = st.session_state.alignment_cfg
     event_types_avail = (
         ev_mod.get_unique_event_types(event_df)
@@ -1328,42 +1766,97 @@ def _tab_events() -> None:
         else []
     )
 
+    alignment_modes = ["Disabled", "Event-based", "Manual global timestamp"]
+    if aln.get("event_type"):
+        default_alignment_mode = "Event-based"
+    elif aln.get("fallback_timestamp"):
+        default_alignment_mode = "Manual global timestamp"
+    else:
+        default_alignment_mode = "Disabled"
     alignment_mode = st.radio(
         "Alignment mode",
-        ["Event-based", "Manual global timestamp", "Disabled"],
-        index=0,
+        alignment_modes,
+        index=alignment_modes.index(default_alignment_mode),
+        help=(
+            "Select how time zero should be chosen. Event-based uses timestamps from "
+            "the event table; manual uses one timestamp for all subjects."
+        ),
     )
-    aln["label"] = st.text_input("Alignment label", value=aln.get("label", "J0"))
-    aln["scope"] = st.selectbox("Scope", ["subject", "group"], index=0)
+    aln["label"] = st.text_input(
+        "Alignment label",
+        value=aln.get("label", "J0"),
+        help="Short name stored in exports for this anchor. Example: J0, surgery, treatment_start.",
+    )
+    aln["scope"] = st.selectbox(
+        "Who gets their own anchor timestamp?",
+        ["subject", "group"],
+        index=0,
+        help=(
+            "Subject: find one anchor per subject/cage, with group fallback if needed. "
+            "Group: all subjects in the same group use the group event timestamp."
+        ),
+    )
 
     if alignment_mode == "Event-based":
         if event_types_avail:
             sel_etype = st.selectbox(
-                "Alignment event type",
+                "Event type to use as time zero",
                 event_types_avail,
                 index=0,
+                help=(
+                    "Pick the event that should become time zero. The pipeline uses the "
+                    "first matching timestamp for each subject or group."
+                ),
             )
             aln["event_type"] = sel_etype
         else:
-            st.info("No events loaded. Set a manual fallback below.")
+            st.info("No events loaded. Use Manual global timestamp if every subject shares one anchor.")
             aln["event_type"] = None
         aln["fallback_timestamp"] = st.text_input(
-            "Fallback timestamp if no subject event (ISO format, UTC)",
+            "Fallback timestamp for missing event anchors",
             value=aln.get("fallback_timestamp") or "",
+            help=(
+                "Optional ISO timestamp. Used only when no matching event is found for a "
+                "subject or group. Example: 2025-03-18T09:00:00Z."
+            ),
         ) or None
 
     elif alignment_mode == "Manual global timestamp":
         aln["event_type"] = None
         aln["fallback_timestamp"] = st.text_input(
-            "Global alignment timestamp (ISO format, UTC)",
+            "Global time-zero timestamp",
             value=aln.get("fallback_timestamp") or "",
+            help=(
+                "Required for manual alignment. Every row is aligned to this same ISO "
+                "timestamp. Example: 2025-03-18T09:00:00Z."
+            ),
         ) or None
 
     else:  # Disabled
         aln["event_type"] = None
         aln["fallback_timestamp"] = None
+        st.info("Alignment is disabled. Baseline windows and aligned plots will not be available.")
 
     st.session_state.alignment_cfg = aln
+
+    preview = _alignment_preview_table(
+        st.session_state.long_df,
+        event_df,
+        event_type=aln.get("event_type"),
+        scope=aln.get("scope", "subject"),
+        fallback_timestamp=aln.get("fallback_timestamp"),
+    )
+    if alignment_mode != "Disabled" and not preview.empty:
+        missing = int((preview["alignment_timestamp"] == "").sum())
+        with st.expander("Alignment preview", expanded=True):
+            if missing:
+                st.warning(
+                    f"{missing} subject(s) do not have an alignment timestamp yet. "
+                    "Choose a different event type, switch scope, or add a fallback timestamp."
+                )
+            else:
+                st.success("Every detected subject has an alignment timestamp.")
+            st.dataframe(preview, width="stretch", hide_index=True)
 
     # ---- Exclusion rules ----
     st.subheader("Exclusion rules")
@@ -1422,11 +1915,11 @@ def _tab_events() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Tab 5: Baseline & Aggregation
+# Tab 5: Baseline, Aggregation & Pipeline
 # ---------------------------------------------------------------------------
 
 def _tab_baseline() -> None:
-    st.header("Baseline & Aggregation")
+    st.header("Baseline, Aggregation & Pipeline")
     render_contextual_help("baseline")
 
     long_df = st.session_state.long_df
@@ -1434,69 +1927,75 @@ def _tab_baseline() -> None:
         st.info("Load data first (Tab 1).")
         return
 
+    alignment_ready = _alignment_is_configured()
+
     # ---- Baseline configuration ----
     st.subheader("Baseline configuration")
     bsl = st.session_state.baseline_cfg
+    if not alignment_ready:
+        st.info(
+            "Baseline is disabled because Alignment is disabled. This is expected: baseline "
+            "windows are defined relative to time zero, so the app needs an event-based or "
+            "manual alignment anchor first. Aggregation and the rest of the pipeline can still run."
+        )
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            bsl["start_hours"] = st.number_input(
+                "Window start (h relative to event)",
+                value=float(bsl.get("start_hours", -72)),
+                step=1.0,
+                key="bsl_start",
+            )
+        with c2:
+            bsl["end_hours"] = st.number_input(
+                "Window end (h relative to event)",
+                value=float(bsl.get("end_hours", -24)),
+                step=1.0,
+                key="bsl_end",
+            )
+        with c3:
+            bsl["min_coverage"] = st.slider(
+                "Min coverage (fraction)",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(bsl.get("min_coverage", 0.7)),
+                step=0.05,
+                key="bsl_cov",
+            )
+        with c4:
+            bsl["exclude_excluded"] = st.checkbox(
+                "Exclude flagged rows from baseline",
+                value=bool(bsl.get("exclude_excluded", True)),
+                key="bsl_excl",
+            )
+        bsl["impute_from_group_mean"] = st.checkbox(
+            "Impute invalid baselines from group mean",
+            value=bool(bsl.get("impute_from_group_mean", False)),
+            key="bsl_impute_group",
+        )
+        st.session_state.baseline_cfg = bsl
 
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        bsl["start_hours"] = st.number_input(
-            "Window start (h relative to event)",
-            value=float(bsl.get("start_hours", -72)),
-            step=1.0,
-            key="bsl_start",
-        )
-    with c2:
-        bsl["end_hours"] = st.number_input(
-            "Window end (h relative to event)",
-            value=float(bsl.get("end_hours", -24)),
-            step=1.0,
-            key="bsl_end",
-        )
-    with c3:
-        bsl["min_coverage"] = st.slider(
-            "Min coverage (fraction)",
-            min_value=0.0,
-            max_value=1.0,
-            value=float(bsl.get("min_coverage", 0.7)),
-            step=0.05,
-            key="bsl_cov",
-        )
-    with c4:
-        bsl["exclude_excluded"] = st.checkbox(
-            "Exclude flagged rows from baseline",
-            value=bool(bsl.get("exclude_excluded", True)),
-            key="bsl_excl",
-        )
-    bsl["impute_from_group_mean"] = st.checkbox(
-        "Impute invalid baselines from group mean",
-        value=bool(bsl.get("impute_from_group_mean", False)),
-        key="bsl_impute_group",
-    )
-    st.session_state.baseline_cfg = bsl
-
-    with st.expander("Manual baseline overrides", expanded=False):
-        st.session_state.baseline_overrides = st.data_editor(
-            st.session_state.baseline_overrides,
-            width="stretch",
-            num_rows="dynamic",
-            column_config={
-                "subject_id": st.column_config.TextColumn("Subject ID", required=True),
-                "metric_name": st.column_config.TextColumn("Metric", required=True),
-                "baseline_value": st.column_config.NumberColumn("Baseline value", required=True),
-                "notes": st.column_config.TextColumn("Notes"),
-            },
-            key="baseline_overrides_editor",
-        )
-
-    if st.session_state.alignment_cfg.get("event_type") is None and not st.session_state.alignment_cfg.get("fallback_timestamp"):
-        st.warning(
-            "No alignment event configured. Baseline requires alignment. "
-            "Configure alignment in Tab 4, or the baseline step will be skipped."
-        )
+        with st.expander("Manual baseline overrides", expanded=False):
+            st.session_state.baseline_overrides = st.data_editor(
+                st.session_state.baseline_overrides,
+                width="stretch",
+                num_rows="dynamic",
+                column_config={
+                    "subject_id": st.column_config.TextColumn("Subject ID", required=True),
+                    "metric_name": st.column_config.TextColumn("Metric", required=True),
+                    "baseline_value": st.column_config.NumberColumn("Baseline value", required=True),
+                    "notes": st.column_config.TextColumn("Notes"),
+                },
+                key="baseline_overrides_editor",
+            )
 
     # ---- Aggregation ----
     st.subheader("Aggregation")
+    st.write(
+        "Aggregation is independent from alignment. It can be used with or without baseline "
+        "to reduce data density and smooth downstream plots/exports."
+    )
     agg_keys = list(cfg.AGGREGATION_OPTIONS.keys())
     sel_agg = st.selectbox("Aggregation bin size", agg_keys, index=0)
     st.session_state.aggregation_bin = cfg.AGGREGATION_OPTIONS[sel_agg]
@@ -1504,13 +2003,23 @@ def _tab_baseline() -> None:
     # ---- Run pipeline ----
     st.divider()
     st.subheader("Run full preprocessing pipeline")
-    st.write(
-        "This will apply: metadata merge → light/dark annotation → "
-        "exclusions → alignment → baseline computation."
-    )
+    st.write("Before running, review what the current settings will do to the data:")
+    for item in _pipeline_run_summary():
+        st.markdown(f"- {item}")
 
     if st.button("Run pipeline", type="primary"):
-        with st.spinner("Processing…"):
+        with _working_status(
+            "Running preprocessing pipeline",
+            (
+                "The app is merging metadata, annotating light/dark phases, applying event "
+                "exclusions, "
+                + (
+                    "aligning rows to time zero, computing baselines, and aggregating if requested."
+                    if _alignment_is_configured()
+                    else "skipping alignment and baseline, then aggregating if requested."
+                )
+            ),
+        ):
             _run_pipeline()
         ts = st.session_state.pipeline_run_ts
         if ts:
@@ -1589,7 +2098,12 @@ def _tab_qc() -> None:
             st.dataframe(quality_report, width="stretch", hide_index=True)
 
         if st.session_state.baseline_summary is not None and not st.session_state.baseline_summary.empty:
-            st.plotly_chart(qc.plot_baseline_quality_heatmap(st.session_state.baseline_summary), width="stretch")
+            with _working_status(
+                "Drawing baseline quality heatmap",
+                "The app is visualizing baseline coverage and validity across subjects and metrics.",
+            ):
+                baseline_fig = qc.plot_baseline_quality_heatmap(st.session_state.baseline_summary)
+            st.plotly_chart(baseline_fig, width="stretch")
 
     metrics = sorted(display_df["metric_name"].dropna().unique().tolist()) if "metric_name" in display_df.columns else []
     subjects = sorted(display_df["subject_id"].dropna().unique().tolist()) if "subject_id" in display_df.columns else []
@@ -1614,36 +2128,48 @@ def _tab_qc() -> None:
     # Plot 1: Raw timeseries
     st.subheader("Raw timeseries")
     x_col = "timestamp_local" if "timestamp_local" in display_df.columns else "timestamp_utc"
-    fig1 = qc.plot_raw_timeseries(
-        display_df, sel_metric,
-        subjects=sel_subjects if sel_subjects else None,
-        x_col=x_col,
-        show_exclusions=True,
-    )
+    with _working_status(
+        "Drawing raw time-series plot",
+        "The app is plotting subject-level raw traces and marking excluded periods when available.",
+    ):
+        fig1 = qc.plot_raw_timeseries(
+            display_df, sel_metric,
+            subjects=sel_subjects if sel_subjects else None,
+            x_col=x_col,
+            show_exclusions=True,
+        )
     st.plotly_chart(fig1, width='stretch')
 
     # Plot 2: Aligned timeseries
     if "time_from_event_hours" in display_df.columns and not display_df["time_from_event_hours"].isna().all():
         st.subheader("Aligned timeseries")
         bsl_cfg = st.session_state.baseline_cfg
-        fig2 = qc.plot_aligned_timeseries(
-            display_df, sel_metric,
-            subjects=sel_subjects if sel_subjects else None,
-            y_col=sel_y,
-            show_exclusions=True,
-            show_baseline_window=True,
-            baseline_start_h=float(bsl_cfg.get("start_hours", -72)),
-            baseline_end_h=float(bsl_cfg.get("end_hours", -24)),
-        )
+        with _working_status(
+            "Drawing aligned time-series plot",
+            "The app is plotting traces relative to the alignment anchor and shading the baseline window.",
+        ):
+            fig2 = qc.plot_aligned_timeseries(
+                display_df, sel_metric,
+                subjects=sel_subjects if sel_subjects else None,
+                y_col=sel_y,
+                show_exclusions=True,
+                show_baseline_window=True,
+                baseline_start_h=float(bsl_cfg.get("start_hours", -72)),
+                baseline_end_h=float(bsl_cfg.get("end_hours", -24)),
+            )
         st.plotly_chart(fig2, width='stretch')
 
         # Plot 3: Group mean
         st.subheader("Group mean ± SEM")
-        fig3 = qc.plot_group_mean_timeseries(
-            display_df, sel_metric,
-            y_col=sel_y,
-            groups=sel_groups if sel_groups else None,
-        )
+        with _working_status(
+            "Drawing group mean plot",
+            "The app is summarizing selected subjects into group mean traces with SEM bands.",
+        ):
+            fig3 = qc.plot_group_mean_timeseries(
+                display_df, sel_metric,
+                y_col=sel_y,
+                groups=sel_groups if sel_groups else None,
+            )
         st.plotly_chart(fig3, width='stretch')
     else:
         st.info("Run alignment (Tab 4) and the pipeline (Tab 5) to see aligned plots.")
@@ -1751,7 +2277,13 @@ def _tab_export() -> None:
 
     # Build ZIP
     if st.button("Build export ZIP", type="primary"):
-        with st.spinner("Building ZIP…"):
+        with _working_status(
+            "Building export ZIP",
+            (
+                "The app is collecting processed tables, metadata, reports, analysis outputs, "
+                "figures, and provenance hashes into one downloadable archive."
+            ),
+        ):
             estimated_bytes = int(proc.memory_usage(deep=True).sum()) if proc is not None else 0
             export_kwargs = dict(
                 processed_df=proc,
@@ -1799,6 +2331,7 @@ def _tab_export() -> None:
         "facility_events.csv",
         "daily_means.csv",
         "circadian_summary.csv",
+        "circadian_profile.csv",
         "light_dark_summary.csv",
         "quality_report.csv",
         "auc_summary.csv",
@@ -1869,35 +2402,110 @@ def _tab_analysis() -> None:
     with c3:
         bin_size = st.selectbox("Summary bin", ["1D", "2D", "1W"], key="analysis_bin")
 
+    metric_df = proc[proc["metric_name"] == sel_metric].copy()
+    subjects = sorted(metric_df["subject_id"].dropna().astype(str).unique().tolist()) if "subject_id" in metric_df.columns else []
+
+    raw_c1, raw_c2 = st.columns([3, 2])
+    with raw_c1:
+        raw_subjects = st.multiselect(
+            "Raw trace subjects",
+            subjects,
+            default=subjects[:6],
+            key="analysis_raw_subjects",
+        )
+    with raw_c2:
+        show_events = st.checkbox("Show events on raw trace", value=True, key="analysis_show_events")
+
+    max_available_days = 1
+    if "timestamp_local" in metric_df.columns:
+        ts_for_days = pd.to_datetime(metric_df["timestamp_local"], errors="coerce").dropna()
+        if not ts_for_days.empty:
+            max_available_days = max(1, int((ts_for_days.dt.normalize().max() - ts_for_days.dt.normalize().min()).days) + 1)
+
+    circ_c1, circ_c2, circ_c3 = st.columns(3)
+    with circ_c1:
+        circ_days = st.number_input(
+            "Circadian days to include",
+            min_value=1,
+            max_value=max_available_days,
+            value=min(1, max_available_days),
+            step=1,
+            key="analysis_circ_days",
+        )
+    with circ_c2:
+        circ_bin = st.selectbox("Circadian ZT bin", [0.5, 1.0, 2.0, 3.0], index=1, key="analysis_circ_bin")
+    with circ_c3:
+        circ_norm = st.selectbox(
+            "Circadian normalization",
+            ["Raw values", "Normalize to 24 h max", "Normalize to max in 3 h after dark onset"],
+            key="analysis_circ_norm",
+        )
+
     auc_c1, auc_c2 = st.columns(2)
     with auc_c1:
         auc_start = st.number_input("AUC start (h)", value=0.0, step=24.0)
     with auc_c2:
         auc_end = st.number_input("AUC end (h)", value=168.0, step=24.0)
 
-    metric_df = proc[proc["metric_name"] == sel_metric].copy()
-    circadian, circ_warns = analysis.summarize_circadian_cosinor(metric_df, value_col="value")
-    phase, phase_warns = analysis.summarize_light_dark(metric_df, value_col="value")
-    time_bins, bin_warns = analysis.summarize_time_bins(
-        metric_df,
-        bin_size=bin_size,
-        relative_to="alignment",
-        value_col=sel_value,
-    )
-    auc, auc_warns = analysis.compute_auc_per_animal(
-        metric_df,
-        start=auc_start,
-        end=auc_end,
-        value_col=sel_value,
-    )
-    stats, stats_warns = (
-        analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
-    )
-    analysis_warns = circ_warns + phase_warns + bin_warns + auc_warns + stats_warns
+    st.subheader("Raw trace with events")
+    x_col = "timestamp_local" if "timestamp_local" in metric_df.columns else "timestamp_utc"
+    with _working_status(
+        "Drawing raw analysis trace",
+        "The app is plotting raw subject traces and overlaying event timestamps for visual inspection.",
+    ):
+        raw_fig = qc.plot_raw_timeseries(
+            metric_df,
+            sel_metric,
+            subjects=raw_subjects if raw_subjects else None,
+            x_col=x_col,
+            show_exclusions=True,
+        )
+        event_df = st.session_state.event_df
+        if show_events and event_df is not None and not event_df.empty:
+            event_x_col = x_col if x_col in event_df.columns else "timestamp_utc"
+            raw_values = pd.to_numeric(metric_df[sel_value if sel_value in metric_df.columns else "value"], errors="coerce")
+            if raw_values.notna().any():
+                _add_event_overlay(raw_fig, event_df, x_col=event_x_col, y_value=float(raw_values.max()))
+    st.plotly_chart(raw_fig, width="stretch")
+
+    with _working_status(
+        "Computing exploratory analysis",
+        (
+            "The app is calculating circadian rhythm summaries, light/dark summaries, "
+            "time-bin means, per-animal AUC, quick exploratory statistics, and the "
+            "circadian profile table."
+        ),
+    ):
+        circadian, circ_warns = analysis.summarize_circadian_cosinor(metric_df, value_col="value")
+        phase, phase_warns = analysis.summarize_light_dark(metric_df, value_col="value")
+        time_bins, bin_warns = analysis.summarize_time_bins(
+            metric_df,
+            bin_size=bin_size,
+            relative_to="alignment",
+            value_col=sel_value,
+        )
+        auc, auc_warns = analysis.compute_auc_per_animal(
+            metric_df,
+            start=auc_start,
+            end=auc_end,
+            value_col=sel_value,
+        )
+        stats, stats_warns = (
+            analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
+        )
+        analysis_warns = circ_warns + phase_warns + bin_warns + auc_warns + stats_warns
+        circadian_profile = _circadian_profile(
+            metric_df,
+            value_col=sel_value,
+            max_days=int(circ_days),
+            zt_bin_hours=float(circ_bin),
+            normalize_mode=circ_norm,
+        )
 
     st.session_state.analysis_tables = {
         "daily_means.csv": time_bins,
         "circadian_summary.csv": circadian,
+        "circadian_profile.csv": circadian_profile,
         "light_dark_summary.csv": phase,
         "auc_summary.csv": auc,
         "stats_summary.csv": stats,
@@ -1908,10 +2516,41 @@ def _tab_analysis() -> None:
         for warning in analysis_warns:
             st.warning(warning)
 
+    st.subheader("Analysis summary")
+    st.markdown(
+        "\n".join(
+            [
+                f"- Metric: `{sel_metric}`.",
+                f"- Value column: `{sel_value}`.",
+                f"- Raw trace: {len(raw_subjects) if raw_subjects else 'all'} subject(s) shown; events {'shown' if show_events else 'hidden'}.",
+                f"- Circadian rhythm: first {int(circ_days)} day(s), {float(circ_bin):g} h ZT bins, `{circ_norm}`.",
+                f"- Dark phase starts at ZT{_dark_onset_zt():g}; the circadian plot shades ZT{_dark_onset_zt():g}-24.",
+                f"- Time-bin summary: `{bin_size}` bins.",
+                f"- AUC window: {auc_start:g} h to {auc_end:g} h.",
+            ]
+        )
+    )
+
+    st.subheader("Circadian rhythm profile")
+    with _working_status(
+        "Drawing circadian rhythm profile",
+        "The app is plotting group mean circadian traces with SEM and shaded dark phase.",
+    ):
+        circ_fig = _plot_circadian_profile(circadian_profile, value_label=sel_value)
+    st.plotly_chart(circ_fig, width="stretch")
+
     st.subheader("Baseline-corrected group plot")
-    fig = qc.plot_group_mean_timeseries(metric_df, sel_metric, y_col=sel_value)
+    with _working_status(
+        "Drawing baseline-corrected group plot",
+        "The app is plotting group mean traces with SEM for the selected value column.",
+    ):
+        fig = qc.plot_group_mean_timeseries(metric_df, sel_metric, y_col=sel_value)
     st.plotly_chart(fig, width="stretch")
-    st.session_state.analysis_figures = {"analysis_group_mean.png": fig}
+    st.session_state.analysis_figures = {
+        "analysis_raw_trace.png": raw_fig,
+        "analysis_circadian_profile.png": circ_fig,
+        "analysis_group_mean.png": fig,
+    }
 
     st.subheader("Time-bin group summary")
     st.dataframe(time_bins, width="stretch", hide_index=True)
@@ -1950,6 +2589,7 @@ def main() -> None:
 
     st.title(cfg.APP_NAME)
     st.caption(f"v{cfg.APP_VERSION}  |  Digital Ventilated Cage behavioral data preprocessing")
+    _scroll_to_top_once()
 
     if selected_step.startswith("1."):
         _tab_import()
@@ -1967,6 +2607,8 @@ def main() -> None:
         _tab_export()
     elif selected_step.startswith("8."):
         _tab_analysis()
+
+    _render_next_step_button(selected_step)
 
 
 if __name__ == "__main__":
