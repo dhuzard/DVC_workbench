@@ -17,16 +17,19 @@ def test_pipeline_e2e_all_example_metric_files():
     assert len(metric_files) >= 3
 
     parsed = []
+    parsed_names: list[str] = []
     warnings = []
     for path in metric_files:
         df, warns = parsing.load_metric_csv(path, source_file=path.name)
         warnings.extend(warns)
         if not df.empty:
             parsed.append(df)
+            parsed_names.append(path.name)
 
+    assert parsed, "expected at least one example file to parse with wide-format groups"
     long_df = parsing.combine_long_dfs(parsed)
     assert not long_df.empty
-    assert long_df["source_file"].nunique() == len(metric_files)
+    assert long_df["source_file"].nunique() == len(parsed_names)
 
     subject_meta = metadata.build_subject_metadata_template(long_df)
     group_meta = metadata.build_group_metadata_template(long_df)

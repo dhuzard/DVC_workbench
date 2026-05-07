@@ -28,8 +28,8 @@ _ROOT = _APP_DIR.parent
 sys.path.insert(0, str(_APP_DIR))
 sys.path.insert(0, str(_ROOT / "src"))
 
-from components.metadata_tables import group_column_config, subject_column_config
-from components.workflow import (
+from components.metadata_tables import group_column_config, subject_column_config  # noqa: E402
+from components.workflow import (  # noqa: E402
     render_contextual_help,
     render_data_flow_diagram,
     render_output_glossary,

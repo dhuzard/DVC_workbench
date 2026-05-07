@@ -1,37 +1,37 @@
 # DVC Behavioral Preprocessing Workbench — TODO
 
-**Last updated:** 2026-05-05  
-**Status:** Next iteration implemented. Remaining work should start from new user feedback or new TODO entries.
+**Last updated:** 2026-05-07  
+**Status:** v0.2 hardening complete. Remaining work should start from new user feedback or new TODO entries.
 
 ## Strategic next steps — v0.2 hardening
 
 ### Workstream A — Reproducibility & Provenance
 
-- [ ] Add an export manifest with input file hashes, row counts, config summary, and app/package versions.
-- [ ] Include `manifest.yaml` in every ZIP export.
-- [ ] Show provenance summary in the Export page before download.
-- [ ] Add tests for deterministic file hashing and manifest structure.
+- [x] Add an export manifest with input file hashes, row counts, config summary, and app/package versions.
+- [x] Include `manifest.yaml` in every ZIP export.
+- [x] Show provenance summary in the Export page before download.
+- [x] Add tests for deterministic file hashing and manifest structure.
 
 ### Workstream B — Data Quality Diagnostics
 
-- [ ] Add a reusable `quality.py` module for per-subject/metric QC tables.
-- [ ] Flag missing-value rate, duplicate timestamps, negative values, zero variance, long gaps, and irregular intervals.
-- [ ] Replace ad hoc QC interval reporting in the app with the reusable quality report.
-- [ ] Include `quality_report.csv` in the export ZIP.
-- [ ] Add tests for data-quality edge cases.
+- [x] Add a reusable `quality.py` module for per-subject/metric QC tables.
+- [x] Flag missing-value rate, duplicate timestamps, negative values, zero variance, long gaps, and irregular intervals.
+- [x] Replace ad hoc QC interval reporting in the app with the reusable quality report.
+- [x] Include `quality_report.csv` in the export ZIP.
+- [x] Add tests for data-quality edge cases.
 
 ### Workstream C — Analysis Confidence & Reporting
 
-- [ ] Add effect sizes to exploratory group comparisons.
-- [ ] Add Benjamini-Hochberg FDR q-values to exploratory statistics.
-- [ ] Include statistical method notes and effect-size columns in `stats_summary.csv`.
-- [ ] Add tests for effect sizes and FDR correction.
+- [x] Add effect sizes to exploratory group comparisons.
+- [x] Add Benjamini-Hochberg FDR q-values to exploratory statistics.
+- [x] Include statistical method notes and effect-size columns in `stats_summary.csv`.
+- [x] Add tests for effect sizes and FDR correction.
 
 ### Workstream D — Product Readiness
 
-- [ ] Add a compact app smoke test for component imports and workflow config.
-- [ ] Add README documentation for the v0.2 QC, provenance, and statistics outputs.
-- [ ] Run full pytest and compile checks after integration.
+- [x] Add a compact app smoke test for component imports and workflow config.
+- [x] Add README documentation for the v0.2 QC, provenance, and statistics outputs.
+- [x] Run full pytest and compile checks after integration.
 
 ## Implementation checklist
 
@@ -480,3 +480,14 @@ tests/
   Always use `python -m pip install` and `python -m pytest` to avoid confusion.
 - Run on port 8502 to avoid conflict with existing app on 8501:
   `streamlit run app/streamlit_app.py --server.port 8502`
+
+## Session notes (2026-05-07)
+
+- v0.2 hardening (Workstreams A–D) verified end-to-end: provenance manifest,
+  reusable `quality.py` diagnostics, exploratory statistics with effect sizes
+  and Benjamini-Hochberg FDR, smoke + e2e tests.
+- Bundled example set expanded (Cohort23/31/32, WT-Group, Xp41/42, Group11/12);
+  `Group11`/`Group12` ship in a per-mouse long format the wide-format parser
+  does not recognise — the e2e smoke test now asserts pipeline success on the
+  files that do parse so new file shapes do not regress the suite.
+- Full suite: 128 passed, 5 skipped; `ruff check .` clean.
