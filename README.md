@@ -6,42 +6,92 @@ A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cag
 
 ---
 
-## Quick start
+## Quick start for beta testers (no coding needed)
 
-### For beta testers (no Python install required)
+> Your data **stays on your computer**. The app runs locally in a container — nothing is uploaded to a server.
 
-The app runs in [Docker](https://www.docker.com/products/docker-desktop/), so testers only need Docker Desktop installed. All uploaded data stays on the tester's machine — nothing is sent to a remote server.
+You only need to do **Step 1 once**. After that, opening the app is two clicks.
 
-1. Install **Docker Desktop** and start it.
-2. Download (or clone) this repository as a folder.
-3. Double-click the launcher for your OS:
-   - **Windows:** `run.bat`
-   - **macOS / Linux:** `run.sh` (you may first need `chmod +x run.sh`)
-4. The first run builds the image (a few minutes). Subsequent runs start in seconds.
-5. Open <http://localhost:8501> in your browser.
-6. To stop the app, press **Ctrl+C** in the terminal (or close the window on Windows).
+### Step 1 — Install Docker Desktop (one-time, ~5 minutes)
 
-Exported ZIPs and CSVs land in the local `outputs/` folder (mounted into the container).
+Docker is the program that runs the workbench in a sandbox. It's free.
 
-If you prefer the raw Docker command instead of the launcher:
+1. Go to <https://www.docker.com/products/docker-desktop/> and download Docker Desktop for your operating system.
+   - **Windows:** pick the Windows installer. If asked, choose the **WSL 2** option (the installer will guide you).
+   - **macOS:** choose the installer that matches your chip — **Apple Silicon** (M1/M2/M3/M4) or **Intel**. If you're not sure, click the Apple menu → *About This Mac* and check "Chip" or "Processor".
+   - **Linux:** install Docker Engine via your package manager (see Docker's docs).
+2. Open the installer and accept the defaults.
+3. **Start Docker Desktop** (Start menu on Windows, Applications on macOS). Wait until the whale icon in the taskbar/menu bar stops animating — that means Docker is ready.
+
+You do **not** need to create a Docker account to run the app.
+
+### Step 2 — Download the workbench (one-time)
+
+1. On the GitHub page for this project, click the green **`<> Code`** button.
+2. Choose **Download ZIP**.
+3. **Unzip** the file somewhere easy to find (e.g. your Desktop). You should now have a folder named something like `DVC_workbench-main`.
+
+### Step 3 — Launch the app
+
+Open the unzipped folder, then:
+
+- **Windows:** double-click **`run.bat`**
+- **macOS:** in Finder, right-click **`run.sh`** → *Open* (you may have to confirm "Open" once because the script is unsigned). Alternatively, in Terminal: `cd` into the folder and run `./run.sh` (first time only: `chmod +x run.sh`).
+- **Linux:** `./run.sh` from a terminal in the folder.
+
+A black/white terminal window will open and show progress.
+
+- **First launch:** the image builds. Expect **5–15 minutes**, depending on internet speed. You'll see lots of scrolling text — that's normal.
+- **Subsequent launches:** a few seconds.
+
+When you see a line like `You can now view your Streamlit app in your browser` (or just `Uvicorn server started`), open your browser to:
+
+### 👉 <http://localhost:8501>
+
+### Step 4 — Use the app
+
+- The app guides you step-by-step through Import → Metadata → Events → Baseline → QC → Export → Analysis.
+- Click **"Load bundled example"** on the Import page to try it without your own data first.
+- When you click **Export**, the ZIP downloads through your browser. A copy is also written to the `outputs/` subfolder of the workbench folder.
+
+### Step 5 — Stop the app
+
+In the terminal window where you launched it: press **Ctrl + C** (or just close the window).
+To start it again later, repeat Step 3 — you're done with Steps 1 and 2 forever.
+
+---
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Docker is not installed` message in the terminal | You skipped Step 1. Install Docker Desktop and start it. |
+| `Docker Desktop is installed but not running` | Open Docker Desktop from your Start menu / Applications and wait for the whale icon to stop animating. |
+| Browser shows "This site can't be reached" at localhost:8501 | The image may still be building. Wait until the terminal says the server has started. |
+| Port 8501 is already in use | Another app is using that port. Stop it, or edit `docker-compose.yml` and change `"8501:8501"` to e.g. `"8601:8501"`, then open `http://localhost:8601`. |
+| macOS says `"run.sh" cannot be opened because it is from an unidentified developer` | Right-click the file → *Open* → click *Open* in the dialog. Only needed once. |
+| The build fails with a network error | Check your internet, then run `run.bat` / `run.sh` again. Docker resumes from where it stopped. |
+| Big CSV upload (>200 MB) is rejected | The default cap is 500 MB. For larger files, increase `maxUploadSize` in `.streamlit/config.toml` and re-launch. |
+
+If you hit something else, copy the **last 20 lines** of the terminal output and send them with your bug report — that's almost always enough for the dev to diagnose.
+
+---
+
+### Advanced (skip if Step 3 worked)
+
+Prefer the raw Docker CLI? From the project folder:
 
 ```bash
-docker compose up --build
+docker compose up --build      # start
+docker compose down            # stop
 ```
 
 ### For developers
 
 ```bash
-# Install in editable mode with dev extras
 pip install -e ".[dev]"
-
-# Run the app
 streamlit run app/streamlit_app.py
-
-# Run tests
 pytest
-
-# Lint
 ruff check .
 ```
 
