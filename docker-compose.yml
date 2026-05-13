@@ -1,0 +1,10 @@
+services:
+  dvc-workbench:
+    build: .
+    image: dvc-workbench:latest
+    container_name: dvc-workbench
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./outputs:/app/outputs
+    restart: unless-stopped

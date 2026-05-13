@@ -8,6 +8,29 @@ A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cag
 
 ## Quick start
 
+### For beta testers (no Python install required)
+
+The app runs in [Docker](https://www.docker.com/products/docker-desktop/), so testers only need Docker Desktop installed. All uploaded data stays on the tester's machine — nothing is sent to a remote server.
+
+1. Install **Docker Desktop** and start it.
+2. Download (or clone) this repository as a folder.
+3. Double-click the launcher for your OS:
+   - **Windows:** `run.bat`
+   - **macOS / Linux:** `run.sh` (you may first need `chmod +x run.sh`)
+4. The first run builds the image (a few minutes). Subsequent runs start in seconds.
+5. Open <http://localhost:8501> in your browser.
+6. To stop the app, press **Ctrl+C** in the terminal (or close the window on Windows).
+
+Exported ZIPs and CSVs land in the local `outputs/` folder (mounted into the container).
+
+If you prefer the raw Docker command instead of the launcher:
+
+```bash
+docker compose up --build
+```
+
+### For developers
+
 ```bash
 # Install in editable mode with dev extras
 pip install -e ".[dev]"
