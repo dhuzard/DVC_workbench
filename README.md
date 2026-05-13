@@ -41,7 +41,7 @@ Open the unzipped folder, then:
 
 A black/white terminal window will open and show progress.
 
-- **First launch:** the image builds. Expect **5–15 minutes**, depending on internet speed. You'll see lots of scrolling text — that's normal.
+- **First launch:** the launcher tries to **download a ready-made image** from GitHub Container Registry (typically under a minute on fast internet). If that succeeds, the app starts right away. If the pre-built image isn't available — for example, you're on an internal branch or behind a registry block — the launcher falls back to building the image locally (**5–15 minutes**, lots of scrolling text — that's normal).
 - **Subsequent launches:** a few seconds.
 
 When you see a line like `You can now view your Streamlit app in your browser` (or just `Uvicorn server started`), open your browser to:
@@ -82,9 +82,18 @@ If you hit something else, copy the **last 20 lines** of the terminal output and
 Prefer the raw Docker CLI? From the project folder:
 
 ```bash
-docker compose up --build      # start
-docker compose down            # stop
+# Fastest — pull the pre-built image from GHCR (multi-arch: amd64 + arm64)
+docker compose -f docker-compose.prebuilt.yml pull
+docker compose -f docker-compose.prebuilt.yml up
+
+# Or build locally (for developers, or branches without a published image)
+docker compose up --build
+
+# Stop
+docker compose down
 ```
+
+The published image lives at `ghcr.io/dhuzard/dvc_workbench:latest`. Every push to `main` triggers a CI workflow that runs a container smoke test (a real example file through the full pipeline) and, on success, publishes a fresh multi-arch image to GHCR.
 
 ### For developers
 

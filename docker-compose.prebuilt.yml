@@ -1,8 +1,8 @@
 services:
   dvc-workbench:
-    build: .
     image: ghcr.io/dhuzard/dvc_workbench:latest
     container_name: dvc-workbench
+    pull_policy: always
     ports:
       - "8501:8501"
     volumes:

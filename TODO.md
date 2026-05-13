@@ -1,7 +1,7 @@
 # DVC Behavioral Preprocessing Workbench — TODO
 
 **Last updated:** 2026-05-13
-**Status:** v0.2 hardening complete. Workstream E (distribution) opened so non-coder beta testers can run the app locally without a Python toolchain.
+**Status:** v0.2 hardening complete. Workstream E (distribution) live: Docker scaffolding, one-click launchers that prefer the GHCR pre-built image, a container smoke test, and a GitHub Actions workflow that builds, smoke-tests, and publishes multi-arch images to `ghcr.io/dhuzard/dvc_workbench`.
 
 ## Strategic next steps — v0.3 distribution
 
@@ -14,8 +14,8 @@
 - [x] Add `run.sh` / `run.bat` one-click launchers that check Docker is installed and running.
 - [x] Document the non-coder Docker quick start in `README.md`.
 - [ ] Verify a clean `docker compose build` succeeds and the app opens at `localhost:8501`.
-- [ ] Publish a pre-built image to GHCR so testers can `docker run` without a build step.
-- [ ] Add a smoke test that imports a bundled example file end-to-end inside the container.
+- [x] Publish a pre-built image to GHCR so testers can `docker run` without a build step.
+- [x] Add a smoke test that imports a bundled example file end-to-end inside the container.
 - [ ] Optional: produce a signed Mac `.app` / Windows installer via stlite or PyInstaller for testers who cannot install Docker.
 
 ## Strategic next steps — v0.2 hardening
