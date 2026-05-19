@@ -39,3 +39,5 @@ ignore = ["E501", "I001"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "--capture=sys"

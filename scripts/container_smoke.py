@@ -16,6 +16,7 @@ import io
 import sys
 import zipfile
 from pathlib import Path
+from typing import NoReturn
 
 # Resolve project paths whether run from /app (container) or repo root (CI).
 _HERE = Path(__file__).resolve().parent
@@ -44,7 +45,7 @@ EXPECTED_ZIP_MEMBERS = {
 }
 
 
-def _fail(msg: str) -> "Never":  # type: ignore[name-defined]
+def _fail(msg: str) -> NoReturn:
     print(f"FAIL: {msg}")
     sys.exit(1)
 
