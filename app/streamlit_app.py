@@ -895,6 +895,70 @@ def _dark_onset_zt() -> float:
     return (light_off_h - light_on_h) % 24.0
 
 
+def _valid_numeric_count(df: pd.DataFrame, col: str) -> int:
+    if col not in df.columns:
+        return 0
+    return int(pd.to_numeric(df[col], errors="coerce").notna().sum())
+
+
+def _analysis_value_options(df: pd.DataFrame) -> tuple[list[str], str, str | None]:
+    preferred = ["baseline_percent_change", "baseline_corrected_value", "value"]
+    options = [col for col in preferred if _valid_numeric_count(df, col) > 0]
+    default = options[0] if options else ""
+
+    has_empty_baseline = any(
+        col in df.columns and _valid_numeric_count(df, col) == 0
+        for col in ("baseline_percent_change", "baseline_corrected_value")
+    )
+    notice = None
+    if has_empty_baseline and default == "value":
+        notice = "Baseline values are empty because no alignment/baseline was run; using raw value for analysis."
+    return options, default, notice
+
+
+def _time_bin_settings(df: pd.DataFrame) -> tuple[str, str | None, str]:
+    if _valid_numeric_count(df, "time_from_event_hours") > 0:
+        return "alignment", None, "alignment-relative time"
+    for timestamp_col in ("timestamp_local", "timestamp_utc"):
+        if timestamp_col in df.columns and pd.to_datetime(df[timestamp_col], errors="coerce").notna().any():
+            return "absolute", timestamp_col, "absolute timestamps"
+    return "alignment", None, "alignment-relative time"
+
+
+def _auc_settings(df: pd.DataFrame) -> tuple[str | None, float | None, float | None, str]:
+    if _valid_numeric_count(df, "time_from_event_hours") > 0:
+        return "time_from_event_hours", 0.0, 168.0, "alignment-relative hours"
+    for timestamp_col in ("timestamp_local", "timestamp_utc"):
+        if timestamp_col in df.columns and pd.to_datetime(df[timestamp_col], errors="coerce").notna().any():
+            return timestamp_col, None, None, "full available timestamp range"
+    return None, None, None, "no valid time coordinate"
+
+
+def _circadian_profile_issue(df: pd.DataFrame, *, value_col: str, max_days: int) -> str | None:
+    if df.empty:
+        return "No rows are available for the selected metric."
+    missing = [
+        col
+        for col in ("timestamp_local", "zeitgeber_time_hours", "subject_id", value_col)
+        if col not in df.columns
+    ]
+    if missing:
+        return "Missing required column(s): " + ", ".join(missing) + "."
+    checks = {
+        "local timestamps": pd.to_datetime(df["timestamp_local"], errors="coerce"),
+        "Zeitgeber times": pd.to_numeric(df["zeitgeber_time_hours"], errors="coerce"),
+        "selected values": pd.to_numeric(df[value_col], errors="coerce"),
+    }
+    for label, series in checks.items():
+        if series.notna().sum() == 0:
+            return f"No valid {label} are available for the selected metric/value."
+    if df["subject_id"].dropna().empty:
+        return "No subject IDs are available for the selected metric."
+    if max_days < 1:
+        return "Circadian days to include must be at least 1."
+    return None
+
+
 def _circadian_profile(
     df: pd.DataFrame,
     *,
@@ -969,7 +1033,12 @@ def _circadian_profile(
     return summary
 
 
-def _plot_circadian_profile(profile: pd.DataFrame, *, value_label: str) -> go.Figure:
+def _plot_circadian_profile(
+    profile: pd.DataFrame,
+    *,
+    value_label: str,
+    empty_reason: str | None = None,
+) -> go.Figure:
     fig = go.Figure()
     dark_onset = _dark_onset_zt()
     fig.add_vrect(
@@ -983,7 +1052,10 @@ def _plot_circadian_profile(profile: pd.DataFrame, *, value_label: str) -> go.Fi
     )
 
     if profile.empty:
-        fig.update_layout(title="No circadian profile data available.", template="plotly_white")
+        title = "No circadian profile data available."
+        if empty_reason:
+            title = f"{title} {empty_reason}"
+        fig.update_layout(title=title, template="plotly_white")
         return fig
 
     for group_label, group_df in profile.groupby("group_label", dropna=False):
@@ -2394,15 +2466,23 @@ def _tab_analysis() -> None:
     c1, c2, c3 = st.columns(3)
     with c1:
         sel_metric = st.selectbox("Metric", metrics, key="analysis_metric")
+
+    metric_df = proc[proc["metric_name"] == sel_metric].copy()
+
     with c2:
-        value_options = [
-            c for c in ["baseline_percent_change", "baseline_corrected_value", "value"] if c in proc.columns
-        ]
+        value_options, default_value, value_notice = _analysis_value_options(metric_df)
+        if not value_options:
+            st.info("No numeric value column is available for this metric.")
+            return
+        if st.session_state.get("analysis_value") not in value_options:
+            st.session_state.analysis_value = default_value
         sel_value = st.selectbox("Value", value_options, key="analysis_value")
     with c3:
         bin_size = st.selectbox("Summary bin", ["1D", "2D", "1W"], key="analysis_bin")
 
-    metric_df = proc[proc["metric_name"] == sel_metric].copy()
+    if value_notice:
+        st.info(value_notice)
+
     subjects = sorted(metric_df["subject_id"].dropna().astype(str).unique().tolist()) if "subject_id" in metric_df.columns else []
 
     raw_c1, raw_c2 = st.columns([3, 2])
@@ -2441,11 +2521,19 @@ def _tab_analysis() -> None:
             key="analysis_circ_norm",
         )
 
-    auc_c1, auc_c2 = st.columns(2)
-    with auc_c1:
-        auc_start = st.number_input("AUC start (h)", value=0.0, step=24.0)
-    with auc_c2:
-        auc_end = st.number_input("AUC end (h)", value=168.0, step=24.0)
+    time_relative_to, time_timestamp_col, time_mode_label = _time_bin_settings(metric_df)
+    auc_x_col, auc_start_default, auc_end_default, auc_mode_label = _auc_settings(metric_df)
+
+    if auc_x_col == "time_from_event_hours":
+        auc_c1, auc_c2 = st.columns(2)
+        with auc_c1:
+            auc_start = st.number_input("AUC start (h)", value=auc_start_default or 0.0, step=24.0)
+        with auc_c2:
+            auc_end = st.number_input("AUC end (h)", value=auc_end_default or 168.0, step=24.0)
+    else:
+        auc_start = None
+        auc_end = None
+        st.caption(f"AUC uses {auc_mode_label}. Configure alignment to use an hour window.")
 
     st.subheader("Raw trace with events")
     x_col = "timestamp_local" if "timestamp_local" in metric_df.columns else "timestamp_utc"
@@ -2478,17 +2566,27 @@ def _tab_analysis() -> None:
     ):
         circadian, circ_warns = analysis.summarize_circadian_cosinor(metric_df, value_col="value")
         phase, phase_warns = analysis.summarize_light_dark(metric_df, value_col="value")
+        time_bin_kwargs = {
+            "bin_size": bin_size,
+            "relative_to": time_relative_to,
+            "value_col": sel_value,
+        }
+        if time_timestamp_col:
+            time_bin_kwargs["timestamp_col"] = time_timestamp_col
         time_bins, bin_warns = analysis.summarize_time_bins(
             metric_df,
-            bin_size=bin_size,
-            relative_to="alignment",
-            value_col=sel_value,
+            **time_bin_kwargs,
         )
+        auc_kwargs = {
+            "start": auc_start,
+            "end": auc_end,
+            "value_col": sel_value,
+        }
+        if auc_x_col:
+            auc_kwargs["x_col"] = auc_x_col
         auc, auc_warns = analysis.compute_auc_per_animal(
             metric_df,
-            start=auc_start,
-            end=auc_end,
-            value_col=sel_value,
+            **auc_kwargs,
         )
         stats, stats_warns = (
             analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
@@ -2501,6 +2599,11 @@ def _tab_analysis() -> None:
             zt_bin_hours=float(circ_bin),
             normalize_mode=circ_norm,
         )
+        circadian_profile_issue = _circadian_profile_issue(
+            metric_df,
+            value_col=sel_value,
+            max_days=int(circ_days),
+        ) if circadian_profile.empty else None
 
     st.session_state.analysis_tables = {
         "daily_means.csv": time_bins,
@@ -2525,8 +2628,8 @@ def _tab_analysis() -> None:
                 f"- Raw trace: {len(raw_subjects) if raw_subjects else 'all'} subject(s) shown; events {'shown' if show_events else 'hidden'}.",
                 f"- Circadian rhythm: first {int(circ_days)} day(s), {float(circ_bin):g} h ZT bins, `{circ_norm}`.",
                 f"- Dark phase starts at ZT{_dark_onset_zt():g}; the circadian plot shades ZT{_dark_onset_zt():g}-24.",
-                f"- Time-bin summary: `{bin_size}` bins.",
-                f"- AUC window: {auc_start:g} h to {auc_end:g} h.",
+                f"- Time-bin summary: `{bin_size}` bins using {time_mode_label}.",
+                f"- AUC: {auc_mode_label}.",
             ]
         )
     )
@@ -2536,10 +2639,16 @@ def _tab_analysis() -> None:
         "Drawing circadian rhythm profile",
         "The app is plotting group mean circadian traces with SEM and shaded dark phase.",
     ):
-        circ_fig = _plot_circadian_profile(circadian_profile, value_label=sel_value)
+        circ_fig = _plot_circadian_profile(
+            circadian_profile,
+            value_label=sel_value,
+            empty_reason=circadian_profile_issue,
+        )
+    if circadian_profile_issue:
+        st.warning(circadian_profile_issue)
     st.plotly_chart(circ_fig, width="stretch")
 
-    st.subheader("Baseline-corrected group plot")
+    st.subheader("Group mean plot")
     with _working_status(
         "Drawing baseline-corrected group plot",
         "The app is plotting group mean traces with SEM for the selected value column.",
