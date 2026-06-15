@@ -68,9 +68,14 @@ def create_export_zip(
     analysis_tables: dict[str, pd.DataFrame] | None = None,
     figures: dict[str, Any] | None = None,
     manifest: dict[str, Any] | None = None,
+    text_artifacts: dict[str, str] | None = None,
 ) -> bytes:
     """
     Assemble all artefacts into an in-memory ZIP and return the bytes.
+
+    ``text_artifacts`` maps an in-archive path (e.g. ``insights/narrative.md``)
+    to its text content and is written verbatim. It is used for the optional
+    LLM-insights bundle (narrative + payload JSON).
     """
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -152,6 +157,11 @@ def create_export_zip(
                 _text_to_bytes(yaml.dump(safe_manifest, allow_unicode=True, sort_keys=False)),
             )
 
+        if text_artifacts:
+            for name, text in text_artifacts.items():
+                if text:
+                    zf.writestr(name, _text_to_bytes(text))
+
         # Placeholder event metadata (user-defined events)
         zf.writestr(
             "event_metadata.csv",
@@ -182,6 +192,7 @@ def create_export_zip_file(
     analysis_tables: dict[str, pd.DataFrame] | None = None,
     figures: dict[str, Any] | None = None,
     manifest: dict[str, Any] | None = None,
+    text_artifacts: dict[str, str] | None = None,
 ) -> Path:
     """Build the export ZIP directly on disk and return its path.
 
@@ -241,6 +252,10 @@ def create_export_zip_file(
                 "manifest.yaml",
                 _text_to_bytes(yaml.dump(safe_manifest, allow_unicode=True, sort_keys=False)),
             )
+        if text_artifacts:
+            for name, text in text_artifacts.items():
+                if text:
+                    zf.writestr(name, _text_to_bytes(text))
         zf.writestr(
             "event_metadata.csv",
             _text_to_bytes(

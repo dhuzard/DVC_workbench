@@ -45,6 +45,7 @@ from dvc_behavior import (  # noqa: E402
     events as ev_mod,
     exclusions,
     export as exp_mod,
+    insights,
     light_dark,
     metadata as meta_mod,
     parsing,
@@ -2357,6 +2358,9 @@ def _tab_export() -> None:
             ),
         ):
             estimated_bytes = int(proc.memory_usage(deep=True).sum()) if proc is not None else 0
+            insight_artifacts = _build_insight_artifacts(
+                analysis_tables_for_export, analysis_config, manifest, quality_report
+            )
             export_kwargs = dict(
                 processed_df=proc,
                 baseline_summary=st.session_state.baseline_summary,
@@ -2373,6 +2377,7 @@ def _tab_export() -> None:
                 analysis_tables=analysis_tables_for_export,
                 figures=st.session_state.analysis_figures,
                 manifest=manifest,
+                text_artifacts=insight_artifacts,
             )
             if estimated_bytes > 500_000_000:
                 tmp_dir = Path(tempfile.mkdtemp(prefix="dvc_export_"))
@@ -2591,7 +2596,23 @@ def _tab_analysis() -> None:
         stats, stats_warns = (
             analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
         )
-        analysis_warns = circ_warns + phase_warns + bin_warns + auc_warns + stats_warns
+        nonparam_circadian, np_circ_warns = analysis.summarize_nonparametric_circadian(
+            metric_df, value_col="value"
+        )
+        activity_bouts, bout_warns = analysis.summarize_activity_bouts(
+            metric_df, value_col="value"
+        )
+        period_estimate, period_warns = analysis.estimate_period(metric_df, value_col="value")
+        analysis_warns = (
+            circ_warns
+            + phase_warns
+            + bin_warns
+            + auc_warns
+            + stats_warns
+            + np_circ_warns
+            + bout_warns
+            + period_warns
+        )
         circadian_profile = _circadian_profile(
             metric_df,
             value_col=sel_value,
@@ -2609,6 +2630,9 @@ def _tab_analysis() -> None:
         "daily_means.csv": time_bins,
         "circadian_summary.csv": circadian,
         "circadian_profile.csv": circadian_profile,
+        "nonparametric_circadian.csv": nonparam_circadian,
+        "activity_bouts.csv": activity_bouts,
+        "period_estimate.csv": period_estimate,
         "light_dark_summary.csv": phase,
         "auc_summary.csv": auc,
         "stats_summary.csv": stats,
@@ -2678,6 +2702,124 @@ def _tab_analysis() -> None:
         st.caption("Statistics table is empty. AUC needs at least one plottable animal per group.")
     else:
         st.dataframe(stats, width="stretch", hide_index=True)
+        st.caption(
+            "Estimation-first: read `median_difference` with `diff_ci_low`/`diff_ci_high` and "
+            "the sample sizes first. When `small_n_warning` is true the groups are too small for "
+            "the test to ever reach significance, so a non-significant p is uninformative."
+        )
+
+    with st.expander("Non-parametric circadian metrics (IS / IV / RA, M10 / L5)", expanded=False):
+        st.caption(
+            "Distribution-free rhythm descriptors that do not assume a sinusoid: interdaily "
+            "stability (IS), intradaily variability (IV), and relative amplitude (RA) from the "
+            "most-active 10 h (M10) and least-active 5 h (L5)."
+        )
+        if nonparam_circadian.empty:
+            st.caption("Needs multi-day, timestamped activity per subject.")
+        else:
+            st.dataframe(nonparam_circadian, width="stretch", hide_index=True)
+
+    with st.expander("Activity bouts & fragmentation", expanded=False):
+        if activity_bouts.empty:
+            st.caption("Needs timestamped activity per subject.")
+        else:
+            st.dataframe(activity_bouts, width="stretch", hide_index=True)
+
+    with st.expander("Period estimate (Lomb–Scargle)", expanded=False):
+        st.caption("Dominant period per subject for free-running / tau designs.")
+        if period_estimate.empty:
+            st.caption("Needs timestamped activity per subject.")
+        else:
+            st.dataframe(period_estimate, width="stretch", hide_index=True)
+
+    _render_insights_panel(analysis_config_for_insights())
+
+
+def _build_insight_artifacts(
+    analysis_tables: dict,
+    analysis_config: dict,
+    manifest: dict,
+    quality_report,
+) -> dict[str, str]:
+    """Build the traceable, offline insights bundle written under ``insights/``."""
+    import json
+
+    if not analysis_tables:
+        return {}
+    tables = {
+        name[:-4] if name.endswith(".csv") else name: df
+        for name, df in analysis_tables.items()
+    }
+    payload = insights.build_insight_payload(
+        tables,
+        analysis_config=analysis_config,
+        manifest=manifest,
+        quality_report=quality_report,
+    )
+    result = insights.generate_narrative(payload)
+    methods = insights.draft_methods_section(analysis_config, manifest=manifest)
+    return {
+        "insights/narrative.md": (
+            f"{result.text}\n\n---\n\n## Methods (draft)\n\n{methods}\n\n"
+            f"_Provider: {result.provider} ({result.model_id}); "
+            f"payload sha256: {result.payload_sha256}; generated {result.generated_at}._\n"
+        ),
+        "insights/payload.json": json.dumps(payload, indent=2, sort_keys=True),
+    }
+
+
+def analysis_config_for_insights() -> dict:
+    """Compact config summary used for grounded insight narratives and Methods drafts."""
+    return {
+        "timezone": st.session_state.get("timezone"),
+        "light_dark_cycle": {
+            "light_on": st.session_state.get("light_on"),
+            "light_off": st.session_state.get("light_off"),
+        },
+        "app_version": cfg.APP_VERSION,
+    }
+
+
+def _render_insights_panel(config_summary: dict) -> None:
+    """Grounded, offline-first narrative over the computed analysis tables.
+
+    The summary tables — never the raw time series — are turned into a compact
+    payload that an interpretation layer describes in plain language. The default
+    path runs fully offline (no network, no API key) so it always works; local
+    (Ollama) and BYO-key cloud (Anthropic) providers are optional enhancements.
+    """
+    st.subheader("Plain-language insights")
+    st.caption(
+        "Turns the summary tables above into a readable, caveated narrative. Runs offline by "
+        "default — only the small aggregated tables (never your raw data) are ever sent if you "
+        "choose a model provider."
+    )
+
+    tables = {
+        name[:-4] if name.endswith(".csv") else name: df
+        for name, df in st.session_state.analysis_tables.items()
+    }
+    quality_report = st.session_state.get("quality_report")
+    payload = insights.build_insight_payload(
+        tables,
+        analysis_config=config_summary,
+        quality_report=quality_report,
+    )
+    result = insights.generate_narrative(payload)
+    st.markdown(result.text)
+
+    st.session_state.insights_payload = payload
+    st.session_state.insights_narrative = result
+
+    methods = insights.draft_methods_section(config_summary)
+    with st.expander("Draft methods paragraph", expanded=False):
+        st.markdown(methods)
+    st.session_state.insights_methods = methods
+
+    if quality_report is not None and not getattr(quality_report, "empty", True):
+        triage_text, _issues = insights.triage_quality(quality_report)
+        with st.expander("Data-quality triage", expanded=False):
+            st.markdown(triage_text)
 
 
 # ---------------------------------------------------------------------------

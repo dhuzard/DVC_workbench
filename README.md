@@ -117,7 +117,7 @@ ruff check .
 | Baseline & Aggregation | Configure baseline window, optional group-mean imputation/overrides, and run the pipeline |
 | QC Plots | Review raw/aligned plots, baseline quality heatmap, irregular-bin report, and group means |
 | Export | Download a ZIP with processed data, config, metadata, reports, and optional analysis outputs |
-| Analysis | Generate exploratory circadian, binned, AUC, and quick-statistics summaries |
+| Analysis | Generate exploratory circadian (cosinor + rhythmicity test, IS/IV/RA, period), binned, AUC, bout/fragmentation, estimation-first statistics, and plain-language insight summaries |
 
 ---
 
@@ -166,15 +166,20 @@ Known event values: `REMOVED`, `INSERTED`, `CAGE_OFFLINE`, `CAGE_ONLINE`.
 | `treatment_schedule.csv` | Editable treatment/dosing schedule, when provided |
 | `facility_events.csv` | Facility-level confound calendar, when provided |
 | `daily_means.csv` | Group mean ± SEM by selected analysis time bin |
-| `circadian_summary.csv` | Cosinor MESOR, amplitude, acrophase, R2, and phase |
+| `circadian_summary.csv` | Cosinor MESOR, amplitude, acrophase, R2, phase, plus a zero-amplitude rhythmicity p-value and amplitude/acrophase confidence intervals |
+| `nonparametric_circadian.csv` | Distribution-free IS, IV, RA, M10, and L5 per subject |
+| `period_estimate.csv` | Per-subject Lomb–Scargle dominant period (free-running / tau designs) |
+| `activity_bouts.csv` | Per-subject active/inactive bout counts, durations, and fraction time active |
 | `light_dark_summary.csv` | Light/dark group summaries and dark/light ratio |
 | `quality_report.csv` | Per-subject/metric quality diagnostics |
 | `auc_summary.csv` | Per-animal trapezoidal AUC values for the selected window |
-| `stats_summary.csv` | Exploratory p-values, FDR q-values, effect sizes, labels, and statistical notes |
+| `stats_summary.csv` | Estimation-first comparisons: median difference + bootstrap CI, effect sizes + CI, exploratory p/FDR q-values, small-sample warnings, and statistical notes |
 | `analysis_config.yaml` | All parameters used for this run |
 | `manifest.yaml` | Input file hashes, row counts, selected config, and app version |
 | `processing_report.md` | Human-readable run summary |
 | `metadata_validation_report.md` | Metadata quality summary |
+| `insights/narrative.md` | Grounded plain-language interpretation of the summary tables (offline by default) + draft Methods paragraph |
+| `insights/payload.json` | The exact aggregated payload the narrative was generated from (traceability; no raw time series) |
 
 ---
 
@@ -219,9 +224,11 @@ dvc-behavioral-preprocessing-workbench/
 - **subject_id may be a cage label,** not necessarily a biological animal ID. Keep both `subject_id` (detected) and `animal_id` (user-defined) separate.
 - **Baseline is per subject and per metric.** Group-level baselines are not computed; group means are derived from individual subjects.
 - **Exclusions are traceable.** Every excluded row carries its reason in `exclusion_reason`. Excluded rows are retained in the output with `is_excluded=True`.
-- **Exploratory statistics only.** P-values and group comparisons in the app are orientation tools, not confirmatory inference.
-- **Light/dark annotation uses local time.** The user selects a timezone (default: `Europe/Paris`). ZT0 = lights-on time.
+- **Exploratory statistics only.** P-values and group comparisons in the app are orientation tools, not confirmatory inference. Statistics are estimation-first: read the effect/difference with its confidence interval and the sample sizes before any p-value, and heed the `small_n_warning` flag (when groups are too small for the test to ever reach significance).
+- **Light/dark annotation uses local time.** The user selects a timezone (default: `Europe/Paris`). ZT0 = lights-on time. The cosinor phase split honours the configured photoperiod (not a fixed 12:12).
+- **Near-zero baselines are guarded.** Percent-change is not computed when the baseline magnitude is below a small floor; affected rows are flagged via `baseline_percent_change_unstable` so low-activity (e.g. light-phase) baselines cannot inflate group means.
 - **Imputed baselines are flagged.** Group-mean baseline imputation is optional and sets `baseline_imputed=True`.
+- **AI insights are grounded and local-first.** The optional plain-language narrative interprets only the small aggregated summary tables — never your raw time series — and runs fully offline by default (no network, no API key). A local model (Ollama) or a bring-your-own-key cloud model (Anthropic Claude) can be used as an opt-in enhancement; when chosen, only the summary tables are sent. Every narrative records the model and a hash of its input payload for traceability, and always carries the exploratory disclaimer.
 
 ---
 

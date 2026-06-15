@@ -309,30 +309,58 @@ baseline — never a hard dependency.
 
 ## 6. Suggested roadmap (incremental, low-dependency)
 
-**Phase 1 — Scientific trust (no new deps, highest ROI)**
-- Cosinor rhythmicity F-test + amplitude/acrophase CIs; fit at subject level (§3.1).
-- Configurable photoperiod in phase labeling (§3.2).
-- Estimation-first stats: difference + bootstrap CI; effect-size CIs; small-n
-  warnings with n surfaced everywhere (§3.5).
-- Near-zero baseline guard + flag (§3.8).
-- Remove `reporting.py:20`; add parameter-recovery tests (§4).
+> **Implementation status (2026-06-15).** Phases 1–3 are implemented, plus the
+> period-estimation item from Phase 4. The remaining open items are the
+> agentic tool-calling loop and optional literature grounding. See §8.
 
-**Phase 2 — Scientific depth**
-- Non-parametric circadian metrics IS/IV/RA, M10/L5 (§3.3).
-- Bout / fragmentation / daily-total / %-time-active metrics (§3.4).
-- Window-summary-per-subject contrasts to replace per-bin multiplicity (§3.6).
-- Coverage/confidence annotations and CI bands (§3.7).
-- `analysis_results.json` structured summary (§3.10).
+**Phase 1 — Scientific trust (no new deps, highest ROI)** — ✅ done
+- [x] Cosinor rhythmicity F-test + amplitude/acrophase CIs; subject-level fit (§3.1).
+- [x] Configurable photoperiod in phase labeling (§3.2).
+- [x] Estimation-first stats: median difference + bootstrap CI; effect-size CIs;
+  small-n warnings with `min_possible_p` and n surfaced (§3.5).
+- [x] Near-zero baseline guard + `baseline_percent_change_unstable` flag (§3.8).
+- [x] Remove `reporting.py:20`; add parameter-recovery tests (§4).
 
-**Phase 3 — Grounded LLM layer**
-- `insights.py` with `build_insight_payload` + `NullProvider` (offline narrative).
-- Results narrative + QC triage + Methods drafter (§5.3 #1–3).
-- Provider plug-ins (Ollama local, Anthropic BYO-key) with egress disclosure and
-  full traceability into the export bundle (§5.2, §5.4).
+**Phase 2 — Scientific depth** — ✅ mostly done
+- [x] Non-parametric circadian metrics IS/IV/RA, M10/L5 (§3.3).
+- [x] Bout / fragmentation / daily-total / %-time-active metrics (§3.4).
+- [x] Window-summary-per-subject contrasts (`compare_window_summaries`) to
+  replace per-bin multiplicity (§3.6).
+- [x] `insights/payload.json` structured summary (subsumes the JSON in §3.10).
+- [ ] Coverage/confidence annotations and CI *bands* on the plots (§3.7) — the
+  numbers (`n_subjects`, CIs) are computed; richer plot overlays remain.
+
+**Phase 3 — Grounded LLM layer** — ✅ done
+- [x] `insights.py` with `build_insight_payload` + `NullProvider` (offline narrative).
+- [x] Results narrative + QC triage + Methods drafter (§5.3 #1–3).
+- [x] Provider plug-ins (Ollama local, Anthropic BYO-key) with egress disclosure
+  and full traceability into the export bundle (§5.2, §5.4).
 
 **Phase 4 — Agentic / stretch**
-- Tool-calling Q&A over `analysis.py` (§5.3 #4); period estimation / periodogram
-  (§3.9); optional literature grounding (§5.3 #6).
+- [x] Period estimation / periodogram (`estimate_period`, Lomb–Scargle) (§3.9).
+- [ ] Tool-calling Q&A over `analysis.py` (§5.3 #4) — the `ANALYSIS_TOOL_REGISTRY`
+  scaffold exists; the live agent loop is deferred.
+- [ ] Optional literature grounding (§5.3 #6) — deferred (adds external egress).
+
+---
+
+## 8. What shipped on `claude/analytics-llm-insights-review-u6ulya`
+
+- **`analysis.py`:** cosinor rhythmicity test (`p_rhythm`) + amplitude/acrophase
+  CIs + subject-level fit; configurable photoperiod; estimation-first columns in
+  `quick_exploratory_stats`; new `summarize_nonparametric_circadian`,
+  `summarize_activity_bouts`, `compare_window_summaries`, `estimate_period`.
+- **`baseline.py` / `reporting.py`:** near-zero percent-change guard + flag;
+  removed the stale timestamp line.
+- **`insights.py` (new):** `build_insight_payload`, `payload_hash`,
+  `InsightResult`, `LLMProvider`/`NullProvider`/`OllamaProvider`/`AnthropicProvider`,
+  `generate_narrative`, `draft_methods_section`, `triage_quality`, and an
+  analysis-function tool registry — offline-first, never sees raw data.
+- **`export.py`:** generic `text_artifacts` channel writes the `insights/` bundle.
+- **App:** new analysis tables surfaced on the Analysis page; an offline
+  plain-language "insights" panel; insights bundle folded into the export ZIP.
+- **Tests:** `test_analysis_advanced.py` (incl. property-recovery), `test_insights.py`,
+  expanded baseline/reporting/export/app-smoke coverage.
 
 ---
 
