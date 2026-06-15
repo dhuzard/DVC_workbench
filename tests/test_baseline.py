@@ -116,6 +116,56 @@ class TestComputeBaseline:
             pct = c57_1["baseline_percent_change"]
             assert not np.isinf(pct.replace([np.inf, -np.inf], np.nan).dropna()).any()
 
+    def test_near_zero_baseline_marked_unstable(self):
+        """A tiny but non-zero baseline must yield NaN percent change and
+        the unstable flag, while a normal baseline yields a finite value."""
+        long = _make_aligned_long(n_rows=100, bin_min=60, alignment_ts="2024-01-05T07:00:00+0100")
+        long = long.copy()
+        # Force C57_1's baseline-window values to a tiny non-zero number that
+        # is below the default epsilon (1e-3) but not exactly zero.
+        bsl_mask = (
+            (long["time_from_event_hours"] >= -72.0)
+            & (long["time_from_event_hours"] < -24.0)
+            & (long["subject_id"] == "C57_1")
+        )
+        long.loc[bsl_mask, "value"] = 0.0001
+
+        out, _, _ = compute_baseline(long, -72.0, -24.0)
+
+        assert "baseline_percent_change_unstable" in out.columns
+        c57_1 = out[out["subject_id"] == "C57_1"]
+        if not c57_1.empty and not np.isnan(c57_1["baseline_value"].iloc[0]):
+            assert c57_1["baseline_percent_change"].isna().all()
+            assert bool(c57_1["baseline_percent_change_unstable"].iloc[0]) is True
+            # corrected (absolute) value stays well-defined near zero
+            assert not c57_1["baseline_corrected_value"].isna().all()
+
+        # A subject with a normal (non-near-zero) baseline must be stable.
+        c57_2 = out[out["subject_id"] == "C57_2"]
+        if not c57_2.empty and not np.isnan(c57_2["baseline_value"].iloc[0]):
+            assert bool(c57_2["baseline_percent_change_unstable"].iloc[0]) is False
+            finite_rows = c57_2[c57_2["value"].notna()]
+            if not finite_rows.empty:
+                assert finite_rows["baseline_percent_change"].notna().any()
+
+    def test_epsilon_parameter_override(self):
+        """A larger epsilon flags otherwise-normal baselines as unstable."""
+        long = _make_aligned_long(n_rows=100, bin_min=60, alignment_ts="2024-01-05T07:00:00+0100")
+
+        # make_metric_df draws from uniform(0, 10), so baselines are O(1-10).
+        # With a huge epsilon every finite baseline is below the floor.
+        out, _, _ = compute_baseline(long, -72.0, -24.0, epsilon=1e6)
+        finite = out[out["baseline_value"].notna()]
+        if not finite.empty:
+            assert finite["baseline_percent_change_unstable"].all()
+            assert finite["baseline_percent_change"].isna().all()
+
+        # With a tiny epsilon the same normal baselines are stable.
+        out2, _, _ = compute_baseline(long, -72.0, -24.0, epsilon=1e-12)
+        finite2 = out2[out2["baseline_value"].notna() & (out2["baseline_value"].abs() > 1e-6)]
+        if not finite2.empty:
+            assert not finite2["baseline_percent_change_unstable"].any()
+
     def test_low_coverage_marked_invalid(self):
         """If data covers < min_coverage fraction, baseline_valid should be False."""
         long = _make_aligned_long(n_rows=10, bin_min=60, alignment_ts="2024-01-01T17:00:00+0100")
