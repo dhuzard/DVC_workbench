@@ -18,6 +18,11 @@ RUN apt-get update \
 COPY requirements.txt ./
 RUN pip install -r requirements.txt
 
+# Optional AI circadian-scoring deps (Circadiem): HTTP egress + PNG rendering.
+# Imported lazily by the app; baked in so the feature works out of the box.
+COPY requirements-ai.txt ./
+RUN pip install -r requirements-ai.txt
+
 COPY app ./app
 COPY src ./src
 COPY data ./data

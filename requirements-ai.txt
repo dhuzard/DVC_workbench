@@ -1,0 +1,6 @@
+# Optional dependencies for AI circadian scoring (Circadiem).
+# Baked into the Docker image so the feature works out of the box; the core
+# workbench never imports these on the default path. Mirror of the `ai` extra
+# in pyproject.toml.
+requests>=2.31
+kaleido>=0.2

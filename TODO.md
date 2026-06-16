@@ -25,8 +25,9 @@
 - [x] Wire an "AI circadian scoring (Circadiem)" panel into the Analysis page: per-group VCG PNGs → `POST /api/analyze` → store `circadiem_scores.csv` (keyed by `run_id` + label, error rows kept) and the figures.
 - [x] Key handling §5.1(b): forward a server-side `OPENAI_API_KEY` env var as a per-request bearer token; configurable `CIRCADIEM_BASE_URL`; health check + graceful disable when unset.
 - [x] Offline tests (mocked HTTP seam) for schema parsing, validation, `analyze`, health/prompt, and the VCG plot.
-- [ ] Smoke-test against a deployed Circadiem instance (`GET /health` + one `POST /api/analyze`); set `CORS_ORIGIN`/`REDIS_URL`/`PORT` on the service as needed.
-- [ ] Optional: declare `kaleido` (and `requests`) as extras so AI scoring works out of the box.
+- [x] Declare `kaleido` + `requests` as the `ai` extra and bake them into the Docker image so scoring works out of the box.
+- [x] Add an opt-in `circadiem` service (compose `ai` profile) to both compose files + `.env.example` for easy local testing (service-name DNS, no host ports).
+- [ ] Smoke-test against the local/deployed Circadiem instance (`GET /health` + one `POST /api/analyze`); set `CORS_ORIGIN`/`REDIS_URL`/`PORT` on the service as needed.
 
 ## Strategic next steps — v0.2 hardening
 

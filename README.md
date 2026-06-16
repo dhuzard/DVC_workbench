@@ -310,6 +310,25 @@ rubric using an OpenAI vision model. It is **off until you configure a service U
 > container and point the workbench at it. Its logic and UI are intentionally **not**
 > vendored into this repo.
 
+*Try it locally with Docker (before deploying anything).* The compose files ship an
+optional `circadiem` service behind an opt-in `ai` profile, so the default
+`docker compose up` is unchanged:
+
+```bash
+cp .env.example .env        # set OPENAI_API_KEY and CIRCADIEM_IMAGE
+docker compose --profile ai up      # starts workbench + a local Circadiem
+```
+
+The two containers share the compose network, so the workbench reaches Circadiem by
+name at `http://circadiem:5174` (already the default `CIRCADIEM_BASE_URL`); no host
+ports to juggle, and this is backend-to-backend so no `CORS_ORIGIN` is needed. Plain
+`docker compose up` (no `--profile ai`) runs just the workbench, with the AI panel
+showing the service as unreachable. The image bundles `requests` + `kaleido` so scoring
+works out of the box; set `CIRCADIEM_IMAGE` to wherever Circadiem is published, or point
+the compose service at a local checkout with `build:`. (The OpenAI vision call still
+egresses from your local Circadiem to OpenAI — running Circadiem locally keeps the
+*service* local, not the model.)
+
 ---
 
 ## Reproducibility
