@@ -203,6 +203,7 @@ dvc-behavioral-preprocessing-workbench/
 │       ├── baseline.py           # Baseline calculation
 │       ├── aggregation.py        # Optional coarser binning
 │       ├── analysis.py           # Exploratory analysis helpers
+│       ├── insights.py           # Grounded, offline-first LLM insights & Q&A
 │       ├── api_adapter.py        # Future direct DVC API placeholder
 │       ├── qc.py                 # Plotly QC figures
 │       ├── export.py             # ZIP export builder
@@ -229,6 +230,41 @@ dvc-behavioral-preprocessing-workbench/
 - **Near-zero baselines are guarded.** Percent-change is not computed when the baseline magnitude is below a small floor; affected rows are flagged via `baseline_percent_change_unstable` so low-activity (e.g. light-phase) baselines cannot inflate group means.
 - **Imputed baselines are flagged.** Group-mean baseline imputation is optional and sets `baseline_imputed=True`.
 - **AI insights are grounded and local-first.** The optional plain-language narrative interprets only the small aggregated summary tables — never your raw time series — and runs fully offline by default (no network, no API key). A local model (Ollama) or a bring-your-own-key cloud model (Anthropic Claude) can be used as an opt-in enhancement; when chosen, only the summary tables are sent. Every narrative records the model and a hash of its input payload for traceability, and always carries the exploratory disclaimer.
+
+---
+
+## AI insights (optional)
+
+The **Analysis** page can turn the summary tables into readable, caveated prose and
+answer questions about your data. This layer is designed around the same
+local-first promise as the rest of the workbench.
+
+**Plain-language narrative.** Pick an *Insight engine*:
+
+| Engine | What leaves your computer | Needs |
+|--------|---------------------------|-------|
+| **Offline** (default) | Nothing — a deterministic template runs locally | Nothing |
+| **Local model via Ollama** | Only the aggregated summary tables, to your local Ollama server | A running [Ollama](https://ollama.com) + a model |
+| **Anthropic Claude** | Only the aggregated summary tables, to Anthropic's API | An API key + a Claude model id |
+
+The offline narrative renders immediately and is always the version written to the
+export bundle. Model engines run only when you click **Generate**, after an explicit
+note of exactly what is sent. Results show the model id, token usage, and the payload
+hash for traceability.
+
+**Ask a question (grounded Q&A).** With a tool-capable model selected (Anthropic
+Claude), the **Ask a question about your data** panel answers by *calling the real
+analysis functions on your processed data and interpreting the returned tables* — it
+never fabricates numbers. The answer lists which analysis tools it ran for full
+transparency.
+
+**Key / model configuration.** No model id is hardcoded. Paste the Claude model id of
+your choice in the UI, and set the key in the field or via the `ANTHROPIC_API_KEY`
+environment variable. The optional `anthropic` / `requests` packages are imported lazily,
+so the offline path needs neither.
+
+The export ZIP always contains `insights/narrative.md` (offline narrative + draft
+Methods paragraph) and `insights/payload.json` (the exact aggregated input, for audit).
 
 ---
 

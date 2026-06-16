@@ -514,8 +514,12 @@ tests/
     summary tables, never raw time series; every output is hashed for traceability.
   - `export.py`: generic `text_artifacts` channel → `insights/` bundle in the ZIP.
   - App: new analysis tables + offline insights panel on the Analysis page.
-- Remaining open items: CI bands on plots, live agentic tool-calling Q&A,
-  optional literature grounding.
+- Follow-up (2026-06-16): added the insight-engine selector (offline / Ollama /
+  Anthropic) with egress disclosure, and a grounded tool-calling Q&A loop
+  (`build_tool_specs`, `execute_analysis_tool`, `answer_question`,
+  `AnthropicToolProvider`, offline `ScriptedToolProvider`) wired into the Analysis
+  page. Added `AGENTS.md` and a README "AI insights" section.
+- Remaining open items: CI bands on plots, optional literature grounding.
 
 ## Session notes (2026-05-07)
 

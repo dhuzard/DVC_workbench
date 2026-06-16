@@ -338,9 +338,12 @@ baseline — never a hard dependency.
 
 **Phase 4 — Agentic / stretch**
 - [x] Period estimation / periodogram (`estimate_period`, Lomb–Scargle) (§3.9).
-- [ ] Tool-calling Q&A over `analysis.py` (§5.3 #4) — the `ANALYSIS_TOOL_REGISTRY`
-  scaffold exists; the live agent loop is deferred.
+- [x] Tool-calling Q&A over `analysis.py` (§5.3 #4) — `build_tool_specs` +
+  `execute_analysis_tool` + `answer_question` run a bounded agent loop that calls the
+  real analysis functions; an offline `ScriptedToolProvider` keeps it fully testable.
+  Wired into the Analysis page (tool-capable provider required).
 - [ ] Optional literature grounding (§5.3 #6) — deferred (adds external egress).
+- [ ] CI *bands* on the analysis plots (§3.7) — the numbers exist; the overlays remain.
 
 ---
 
@@ -355,12 +358,17 @@ baseline — never a hard dependency.
 - **`insights.py` (new):** `build_insight_payload`, `payload_hash`,
   `InsightResult`, `LLMProvider`/`NullProvider`/`OllamaProvider`/`AnthropicProvider`,
   `generate_narrative`, `draft_methods_section`, `triage_quality`, and an
-  analysis-function tool registry — offline-first, never sees raw data.
+  analysis-function tool registry — offline-first, never sees raw data. Plus the
+  grounded Q&A loop: `build_tool_specs`, `execute_analysis_tool`,
+  `AnthropicToolProvider`/`ScriptedToolProvider`, and `answer_question`.
 - **`export.py`:** generic `text_artifacts` channel writes the `insights/` bundle.
-- **App:** new analysis tables surfaced on the Analysis page; an offline
-  plain-language "insights" panel; insights bundle folded into the export ZIP.
+- **App:** new analysis tables surfaced on the Analysis page; an insight-engine
+  selector (offline / Ollama / Anthropic) with egress disclosure; a grounded
+  tool-calling Q&A panel; insights bundle folded into the export ZIP.
+- **Docs:** `AGENTS.md` contributor/agent guide; README "AI insights" section.
 - **Tests:** `test_analysis_advanced.py` (incl. property-recovery), `test_insights.py`,
-  expanded baseline/reporting/export/app-smoke coverage.
+  `test_insights_agent.py` (offline agent loop), expanded
+  baseline/reporting/export/app-smoke coverage.
 
 ---
 
