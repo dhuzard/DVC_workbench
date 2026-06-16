@@ -18,6 +18,17 @@
 - [x] Add a smoke test that imports a bundled example file end-to-end inside the container.
 - [ ] Optional: produce a signed Mac `.app` / Windows installer via stlite or PyInstaller for testers who cannot install Docker.
 
+### Workstream F — Circadiem AI circadian scoring (service-to-service)
+
+- [x] Add `circadiem.py` HTTP client + 0–3 marker schema mirror (`ResultRow`/`ErrorRow`), lazy `requests`, monkeypatchable `_http_*` seam.
+- [x] Add `qc.plot_circadiem_vcg` in the rubric convention (dark onset at x=0, black global mean curve, ±2 SD band) + `qc.figure_to_png_bytes` (kaleido-required, clear error).
+- [x] Wire an "AI circadian scoring (Circadiem)" panel into the Analysis page: per-group VCG PNGs → `POST /api/analyze` → store `circadiem_scores.csv` (keyed by `run_id` + label, error rows kept) and the figures.
+- [x] Key handling §5.1(b): forward a server-side `OPENAI_API_KEY` env var as a per-request bearer token; configurable `CIRCADIEM_BASE_URL`; health check + graceful disable when unset.
+- [x] Offline tests (mocked HTTP seam) for schema parsing, validation, `analyze`, health/prompt, and the VCG plot.
+- [x] Declare `kaleido` + `requests` as the `ai` extra and bake them into the Docker image so scoring works out of the box.
+- [x] Add an opt-in `circadiem` service (compose `ai` profile) to both compose files + `.env.example` for easy local testing (service-name DNS, no host ports).
+- [ ] Smoke-test against the local/deployed Circadiem instance (`GET /health` + one `POST /api/analyze`); set `CORS_ORIGIN`/`REDIS_URL`/`PORT` on the service as needed.
+
 ## Strategic next steps — v0.2 hardening
 
 ### Workstream A — Reproducibility & Provenance

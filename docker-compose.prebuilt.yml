@@ -7,4 +7,29 @@ services:
       - "8501:8501"
     volumes:
       - ./outputs:/app/outputs
+    environment:
+      # AI circadian scoring (Circadiem). Harmless when Circadiem is not running
+      # — the Analysis panel just shows the service as unreachable. Reaches the
+      # circadiem service below by its name on the shared compose network.
+      CIRCADIEM_BASE_URL: "${CIRCADIEM_BASE_URL:-http://circadiem:5174}"
+      # Forwarded to Circadiem as a per-request bearer token; never stored.
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+    restart: unless-stopped
+
+  # Optional local Circadiem instance for testing AI scoring before deploying.
+  # Opt-in: only starts with `docker compose -f docker-compose.prebuilt.yml
+  # --profile ai up`. Set CIRCADIEM_IMAGE and OPENAI_API_KEY in a .env file —
+  # see .env.example.
+  circadiem:
+    image: "${CIRCADIEM_IMAGE:-ghcr.io/dhuzard/circadiem:latest}"
+    container_name: circadiem
+    pull_policy: always
+    profiles: ["ai"]
+    expose:
+      - "5174"
+    # Uncomment to also reach Circadiem directly from the host (e.g. curl):
+    # ports:
+    #   - "5174:5174"
+    environment:
+      PORT: "5174"
     restart: unless-stopped

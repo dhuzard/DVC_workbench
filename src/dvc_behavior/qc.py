@@ -423,3 +423,156 @@ def detect_irregular_bins(
             }
         )
     return pd.DataFrame(rows)
+
+
+# ---------------------------------------------------------------------------
+# Circadiem VCG plot (dark-onset-aligned global mean, ±N SD band)
+# ---------------------------------------------------------------------------
+
+_VCG_DARK_COLOR = "rgba(40, 40, 60, 0.16)"
+
+
+def plot_circadiem_vcg(
+    df: pd.DataFrame,
+    *,
+    value_col: str = "value",
+    dark_onset_zt: float = 12.0,
+    photoperiod_dark_hours: float = 12.0,
+    zt_bin_hours: float = 1.0,
+    band_sd: float = 2.0,
+    title: str | None = None,
+) -> go.Figure:
+    """Draw the global activity (VCG) curve in the convention Circadiem expects.
+
+    The scoring rubric assumes a fixed plot layout (§2 of the integration spec):
+    **dark onset at x = 0**, a single **global mean curve in black**, and a
+    variability band of **±``band_sd`` SD** (default ``±2 SD`` → ``+-2SD``).
+    Time is expressed relative to dark onset by shifting Zeitgeber time
+    (``zeitgeber_time_hours``) by ``dark_onset_zt`` modulo 24, so the dark phase
+    occupies ``x ∈ [0, photoperiod_dark_hours]`` and the light phase the rest.
+
+    The mean and SD are computed over **per-subject** means when ``subject_id``
+    is present, so the band reflects between-animal variability. Table-in /
+    figure-out: returns an empty-titled figure (never raises) when there is
+    nothing plottable, matching the rest of this module.
+    """
+    fig = go.Figure()
+    dark_hours = max(0.0, min(24.0, float(photoperiod_dark_hours)))
+    # Shade the dark phase first so the curve sits on top.
+    fig.add_vrect(
+        x0=0.0,
+        x1=dark_hours,
+        fillcolor=_VCG_DARK_COLOR,
+        layer="below",
+        line_width=0,
+        annotation_text="Dark phase",
+        annotation_position="top left",
+    )
+    fig.add_vline(x=0.0, line_dash="dash", line_color="grey", annotation_text="Dark onset")
+
+    required = {"zeitgeber_time_hours", value_col}
+    if df is None or df.empty or not required <= set(df.columns):
+        fig.update_layout(
+            title=title or "No data for the Circadiem VCG plot.",
+            template="plotly_white",
+        )
+        return fig
+
+    data = df.copy()
+    data["zeitgeber_time_hours"] = pd.to_numeric(data["zeitgeber_time_hours"], errors="coerce")
+    data[value_col] = pd.to_numeric(data[value_col], errors="coerce")
+    if "is_excluded" in data.columns:
+        data = data[~data["is_excluded"].fillna(False)]
+    data = data.dropna(subset=["zeitgeber_time_hours", value_col])
+    if data.empty:
+        fig.update_layout(
+            title=title or "No plottable values for the Circadiem VCG plot.",
+            template="plotly_white",
+        )
+        return fig
+
+    # Align so dark onset is at x = 0, then bin.
+    bin_h = float(zt_bin_hours) if zt_bin_hours and zt_bin_hours > 0 else 1.0
+    x = (data["zeitgeber_time_hours"] - float(dark_onset_zt)) % 24.0
+    data["_x_bin"] = (x // bin_h) * bin_h + bin_h / 2.0
+
+    # Aggregate to the experimental unit (subject) before summarizing.
+    if "subject_id" in data.columns:
+        unit = (
+            data.groupby(["_x_bin", "subject_id"], dropna=False)[value_col]
+            .mean()
+            .reset_index()
+        )
+    else:
+        unit = data[["_x_bin", value_col]].copy()
+
+    summary = (
+        unit.groupby("_x_bin")[value_col]
+        .agg(mean="mean", sd=lambda s: s.std(ddof=1), n="count")
+        .reset_index()
+        .sort_values("_x_bin")
+    )
+    if summary.empty:
+        fig.update_layout(title=title or "No VCG data after aggregation.", template="plotly_white")
+        return fig
+
+    half = (float(band_sd) * summary["sd"]).fillna(0.0)
+    upper = summary["mean"] + half
+    lower = summary["mean"] - half
+    band_label = f"±{band_sd:g} SD"
+
+    fig.add_trace(
+        go.Scatter(
+            x=pd.concat([summary["_x_bin"], summary["_x_bin"][::-1]]),
+            y=pd.concat([upper, lower[::-1]]),
+            fill="toself",
+            fillcolor="rgba(0, 0, 0, 0.12)",
+            line=dict(color="rgba(0,0,0,0)"),
+            hoverinfo="skip",
+            showlegend=True,
+            name=band_label,
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=summary["_x_bin"],
+            y=summary["mean"],
+            mode="lines",
+            name="Global mean (VCG)",
+            line=dict(color="black", width=2),
+            customdata=summary["n"],
+            hovertemplate="%{y:.3g}<br>n=%{customdata}<extra>VCG</extra>",
+        )
+    )
+    fig.update_layout(
+        title=title or f"Circadian VCG (global mean {band_label})",
+        xaxis_title="Time from dark onset (h)",
+        yaxis_title=value_col,
+        xaxis=dict(range=[0, 24], dtick=max(1.0, dark_hours / 2.0)),
+        hovermode="x unified",
+        template="plotly_white",
+    )
+    return fig
+
+
+def figure_to_png_bytes(
+    fig: go.Figure,
+    *,
+    width: int = 1100,
+    height: int = 650,
+    scale: float = 2.0,
+) -> bytes:
+    """Render a Plotly figure to PNG bytes (requires the ``kaleido`` engine).
+
+    Unlike the best-effort figure export in ``export.py`` (where a missing
+    engine is silently skipped), Circadiem scoring *needs* the PNG, so a missing
+    or broken engine raises a clear :class:`RuntimeError` with install guidance.
+    """
+    try:
+        return fig.to_image(format="png", width=width, height=height, scale=scale)
+    except Exception as exc:  # noqa: BLE001 - normalize to a guidance error
+        raise RuntimeError(
+            "Could not render the plot to PNG. The Plotly static-image engine "
+            "'kaleido' is required for AI circadian scoring. Install it with "
+            f"`pip install kaleido`. Original error: {exc}"
+        ) from exc

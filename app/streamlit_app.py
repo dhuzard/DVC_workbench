@@ -41,6 +41,7 @@ from dvc_behavior import (  # noqa: E402
     alignment,
     analysis,
     baseline,
+    circadiem,
     config as cfg,
     events as ev_mod,
     exclusions,
@@ -116,6 +117,7 @@ def _init_state() -> None:
         "insights_narrative": None,
         "insights_methods": None,
         "qa_result": None,
+        "circadiem_result": None,
         "literature_result": None,
         "quality_report": None,
         "raw_event_file_mapping": {},
@@ -2446,6 +2448,7 @@ def _tab_export() -> None:
         "quality_report.csv",
         "auc_summary.csv",
         "stats_summary.csv",
+        "circadiem_scores.csv",
         "figures/",
         "study_metadata.yaml",
         "event_metadata.csv",
@@ -2784,7 +2787,167 @@ def _tab_analysis() -> None:
         else:
             st.dataframe(period_estimate, width="stretch", hide_index=True)
 
+    _render_circadiem_panel(metric_df, value_col=sel_value)
+
     _render_insights_panel(analysis_config_for_insights())
+
+
+def _render_circadiem_panel(metric_df: pd.DataFrame, *, value_col: str) -> None:
+    """AI circadian scoring (Circadiem): render dark-onset-aligned VCG PNGs per
+    group, send them to the Circadiem service, and store the 0--3 marker scores.
+
+    Privacy posture matches the rest of the app: only a *rendered plot image* of
+    aggregated group means leaves the machine — never the raw time series. Key
+    handling follows decision §5.1(b): the workbench forwards a server-side
+    ``OPENAI_API_KEY`` (env) to Circadiem as a bearer token; it is never stored.
+    The feature is inert until a Circadiem base URL is configured.
+    """
+    st.subheader("AI circadian scoring (Circadiem)")
+    st.caption(
+        "Renders the global activity curve in Circadiem's plot convention (dark "
+        "onset at x=0, black mean curve, ±2 SD band) and sends the **image** — "
+        "never your raw data — to a Circadiem service, which scores six circadian "
+        "markers (0–3) with an OpenAI vision model. Off unless a service URL is set."
+    )
+
+    col_a, col_b = st.columns(2)
+    base_url = col_a.text_input(
+        "Circadiem base URL",
+        value=circadiem.resolve_base_url(),
+        placeholder="https://circadiem.internal",
+        key="circadiem_base_url",
+        help=f"Defaults to the {circadiem.BASE_URL_ENV} environment variable.",
+    )
+    model = col_b.text_input(
+        "OpenAI vision model",
+        value=circadiem.DEFAULT_MODEL,
+        key="circadiem_model",
+        help="Vision model id Circadiem forwards to OpenAI.",
+    )
+    vcg_band = st.selectbox(
+        "Variability band",
+        list(circadiem.VCG_BANDS),
+        index=list(circadiem.VCG_BANDS).index(circadiem.DEFAULT_VCG_BAND),
+        key="circadiem_vcg_band",
+        help="Must match the band drawn on the plot — the rubric assumes ±2 SD.",
+    )
+
+    base_url = (base_url or "").strip()
+    if not base_url:
+        st.info(
+            f"Set the {circadiem.BASE_URL_ENV} environment variable or enter a "
+            "service URL above to enable AI circadian scoring."
+        )
+        return
+
+    key_ready = circadiem.resolve_api_key() is not None
+    if key_ready:
+        st.caption(
+            f"Server OpenAI key: configured (from `{circadiem.OPENAI_KEY_ENV}`), "
+            "forwarded to Circadiem as a bearer token and never stored."
+        )
+    else:
+        st.warning(
+            f"No `{circadiem.OPENAI_KEY_ENV}` set on this host. Configure it to "
+            "forward a bearer token to Circadiem (decision §5.1(b): server-side key)."
+        )
+
+    band_sd = {"+-1SD": 1.0, "+-2SD": 2.0, "+-3SD": 3.0}[vcg_band]
+    dark_onset_zt = _dark_onset_zt()
+    dark_hours = (24.0 - dark_onset_zt) % 24.0 or 12.0
+    zt_bin = float(st.session_state.get("analysis_circ_bin", 1.0) or 1.0)
+
+    # One VCG image per group, labeled by group — maps scores onto group entities.
+    label_col = "group_label" if "group_label" in metric_df.columns else (
+        "group_id" if "group_id" in metric_df.columns else None
+    )
+    if label_col is not None:
+        groups = [g for g in metric_df[label_col].dropna().astype(str).unique().tolist()]
+    else:
+        groups = []
+    if not groups:
+        groups = ["All"]
+
+    if len(groups) > circadiem.MAX_FILES:
+        st.warning(
+            f"{len(groups)} groups exceed the {circadiem.MAX_FILES}-image request "
+            f"limit; scoring the first {circadiem.MAX_FILES}."
+        )
+        groups = groups[: circadiem.MAX_FILES]
+
+    health_col, run_col = st.columns([1, 2])
+    config = circadiem.CircadiemConfig(
+        base_url=base_url, model=(model or circadiem.DEFAULT_MODEL).strip(), vcg_band=vcg_band
+    )
+    if health_col.button("Check service health", key="circadiem_health"):
+        st.session_state["circadiem_health_ok"] = circadiem.health(config)
+    health_state = st.session_state.get("circadiem_health_ok")
+    if health_state is True:
+        health_col.success("Reachable")
+    elif health_state is False:
+        health_col.error("Unreachable")
+
+    if run_col.button("Score with Circadiem", type="primary", key="circadiem_run"):
+        with _working_status(
+            "Scoring with Circadiem",
+            "Rendering one dark-onset-aligned VCG plot per group and sending the "
+            "images (not raw data) to the Circadiem service.",
+        ):
+            try:
+                images: list[tuple[str, bytes]] = []
+                labels: list[str] = []
+                figures: dict[str, Any] = {}
+                for group in groups:
+                    sub = (
+                        metric_df[metric_df[label_col].astype(str) == group]
+                        if label_col is not None
+                        else metric_df
+                    )
+                    fig = qc.plot_circadiem_vcg(
+                        sub,
+                        value_col=value_col,
+                        dark_onset_zt=dark_onset_zt,
+                        photoperiod_dark_hours=dark_hours,
+                        zt_bin_hours=zt_bin,
+                        band_sd=band_sd,
+                        title=f"VCG — {group}",
+                    )
+                    png = qc.figure_to_png_bytes(fig)
+                    safe = "".join(c if c.isalnum() else "_" for c in group) or "group"
+                    images.append((f"vcg_{safe}.png", png))
+                    labels.append(group)
+                    figures[f"circadiem_vcg_{safe}.png"] = fig
+                rows = circadiem.analyze(
+                    images,
+                    config=config,
+                    api_key=circadiem.resolve_api_key(),
+                    labels=labels,
+                )
+            except (circadiem.CircadiemError, RuntimeError) as exc:
+                st.session_state.circadiem_result = None
+                st.error(str(exc))
+            else:
+                table = circadiem.results_to_frame(rows)
+                st.session_state.circadiem_result = table
+                st.session_state.analysis_tables["circadiem_scores.csv"] = table
+                st.session_state.analysis_figures.update(figures)
+                n_err = int((table["status"] == "error").sum()) if not table.empty else 0
+                if n_err:
+                    st.warning(f"{n_err} of {len(table)} image(s) returned an error row.")
+                st.success(f"Scored {len(table)} image(s).")
+
+    saved = st.session_state.get("circadiem_result")
+    if saved is not None and not saved.empty:
+        run_ids = [r for r in saved["run_id"].dropna().unique().tolist() if r]
+        if run_ids:
+            st.caption("Run id(s): " + ", ".join(f"`{r}`" for r in run_ids))
+        st.dataframe(saved, width="stretch", hide_index=True)
+        st.caption(
+            "Markers (0–3): baseline_light, dark_onset_burst, dark_irregularity, "
+            "midnight_fragmentation, pre_light_decline, pre_dark_anticipation. Error "
+            "rows are kept (status=error) so failures are visible. Scores are AI "
+            "estimates over a plot image — verify before drawing conclusions."
+        )
 
 
 def _build_insight_artifacts(

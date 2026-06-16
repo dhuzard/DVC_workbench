@@ -174,6 +174,7 @@ Known event values: `REMOVED`, `INSERTED`, `CAGE_OFFLINE`, `CAGE_ONLINE`.
 | `quality_report.csv` | Per-subject/metric quality diagnostics |
 | `auc_summary.csv` | Per-animal trapezoidal AUC values for the selected window |
 | `stats_summary.csv` | Estimation-first comparisons: median difference + bootstrap CI, effect sizes + CI, exploratory p/FDR q-values, small-sample warnings, and statistical notes |
+| `circadiem_scores.csv` | AI circadian marker scores (0–3) per group from the optional Circadiem service, keyed by `run_id` + label; per-image failures kept as `status=error` rows (only present if you run AI scoring) |
 | `analysis_config.yaml` | All parameters used for this run |
 | `manifest.yaml` | Input file hashes, row counts, selected config, and app version |
 | `processing_report.md` | Human-readable run summary |
@@ -204,6 +205,7 @@ dvc-behavioral-preprocessing-workbench/
 │       ├── aggregation.py        # Optional coarser binning
 │       ├── analysis.py           # Exploratory analysis helpers
 │       ├── insights.py           # Grounded, offline-first LLM insights & Q&A
+│       ├── circadiem.py          # Optional Circadiem AI circadian-scoring client
 │       ├── literature.py         # Optional Europe PMC literature grounding
 │       ├── api_adapter.py        # Future direct DVC API placeholder
 │       ├── qc.py                 # Plotly QC figures
@@ -283,6 +285,49 @@ The export ZIP always contains `insights/narrative.md` (offline narrative + draf
 Methods paragraph) and `insights/payload.json` (the exact aggregated input, for audit).
 If you fetched references, it also includes `insights/literature.md` and
 `insights/literature.json`.
+
+**AI circadian scoring (Circadiem, optional).** The Analysis page can also send the
+group activity curves to **[Circadiem](https://github.com/dhuzard/dvc_workbench)**, a
+separate, stateless scoring service that grades six circadian markers on a fixed 0–3
+rubric using an OpenAI vision model. It is **off until you configure a service URL**.
+
+- *What leaves your computer:* only a **rendered plot image** (one global mean curve
+  per group), never your raw time series. The workbench draws the plot in the exact
+  convention the rubric assumes — **dark onset at x=0, a black global mean (VCG) curve,
+  and a ±2 SD band** — so the scores are meaningful.
+- *Service & key:* point the workbench at a deployed Circadiem instance via the
+  `CIRCADIEM_BASE_URL` environment variable (or the field in the UI). The workbench
+  forwards a **server-side `OPENAI_API_KEY`** (set in the host environment) to Circadiem
+  as a per-request bearer token; neither the workbench nor Circadiem stores it.
+- *Results:* the six markers (`baseline_light`, `dark_onset_burst`, `dark_irregularity`,
+  `midnight_fragmentation`, `pre_light_decline`, `pre_dark_anticipation`), a confidence
+  level, flags and notes are shown in the UI and written to `circadiem_scores.csv` in the
+  export, keyed by `run_id` + label. Per-image failures are kept as `status=error` rows
+  rather than silently dropped. Scoring needs the optional `kaleido` (PNG rendering) and
+  `requests` packages, imported lazily.
+
+> Circadiem is integrated **service-to-service over HTTP** — deploy it as its own
+> container and point the workbench at it. Its logic and UI are intentionally **not**
+> vendored into this repo.
+
+*Try it locally with Docker (before deploying anything).* The compose files ship an
+optional `circadiem` service behind an opt-in `ai` profile, so the default
+`docker compose up` is unchanged:
+
+```bash
+cp .env.example .env        # set OPENAI_API_KEY and CIRCADIEM_IMAGE
+docker compose --profile ai up      # starts workbench + a local Circadiem
+```
+
+The two containers share the compose network, so the workbench reaches Circadiem by
+name at `http://circadiem:5174` (already the default `CIRCADIEM_BASE_URL`); no host
+ports to juggle, and this is backend-to-backend so no `CORS_ORIGIN` is needed. Plain
+`docker compose up` (no `--profile ai`) runs just the workbench, with the AI panel
+showing the service as unreachable. The image bundles `requests` + `kaleido` so scoring
+works out of the box; set `CIRCADIEM_IMAGE` to wherever Circadiem is published, or point
+the compose service at a local checkout with `build:`. (The OpenAI vision call still
+egresses from your local Circadiem to OpenAI — running Circadiem locally keeps the
+*service* local, not the model.)
 
 ---
 

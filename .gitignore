@@ -17,3 +17,6 @@ outputs/*.md
 !outputs/.gitkeep
 *.DS_Store
 .streamlit/secrets.toml
+# Local secrets / config for docker compose (keep the example tracked)
+.env
+!.env.example
