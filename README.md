@@ -204,6 +204,7 @@ dvc-behavioral-preprocessing-workbench/
 │       ├── aggregation.py        # Optional coarser binning
 │       ├── analysis.py           # Exploratory analysis helpers
 │       ├── insights.py           # Grounded, offline-first LLM insights & Q&A
+│       ├── literature.py         # Optional Europe PMC literature grounding
 │       ├── api_adapter.py        # Future direct DVC API placeholder
 │       ├── qc.py                 # Plotly QC figures
 │       ├── export.py             # ZIP export builder
@@ -263,8 +264,24 @@ your choice in the UI, and set the key in the field or via the `ANTHROPIC_API_KE
 environment variable. The optional `anthropic` / `requests` packages are imported lazily,
 so the offline path needs neither.
 
+> **Recommended starting model:** **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`) —
+> fast and inexpensive, and since the payloads are just small summary tables it produces
+> a solid narrative. Step up to **Claude Sonnet 4.6** (`claude-sonnet-4-6`) for richer
+> synthesis, or a **Claude Opus** model for the most detailed multi-table reasoning and
+> the grounded Q&A. (Use the latest available version of whichever tier you pick.)
+
+**Related literature (optional).** The insights panel can search
+[Europe PMC](https://europepmc.org) for work related to your analysis. It is **off by
+default**; when you run it, only a few **generic topic keywords** (e.g.
+`circadian rhythm locomotor activity rodent`) derived from the *kinds* of results are
+sent — never your data, group names, or file names. The exact queries are shown before
+you search, and results are framed as suggestions to verify, not as evidence. Needs the
+`requests` package (already a dependency) and network access.
+
 The export ZIP always contains `insights/narrative.md` (offline narrative + draft
 Methods paragraph) and `insights/payload.json` (the exact aggregated input, for audit).
+If you fetched references, it also includes `insights/literature.md` and
+`insights/literature.json`.
 
 ---
 

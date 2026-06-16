@@ -519,7 +519,11 @@ tests/
   (`build_tool_specs`, `execute_analysis_tool`, `answer_question`,
   `AnthropicToolProvider`, offline `ScriptedToolProvider`) wired into the Analysis
   page. Added `AGENTS.md` and a README "AI insights" section.
-- Remaining open items: CI bands on plots, optional literature grounding.
+- Follow-up (2026-06-16): added optional literature grounding (`literature.py`,
+  Europe PMC, opt-in, generic-keyword queries only, offline-default) wired into the
+  insights panel and export bundle; added a concrete recommended starting model to
+  the README.
+- Remaining open items: CI bands on the analysis plots.
 
 ## Session notes (2026-05-07)
 

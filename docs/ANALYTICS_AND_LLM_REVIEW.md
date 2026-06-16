@@ -342,7 +342,8 @@ baseline — never a hard dependency.
   `execute_analysis_tool` + `answer_question` run a bounded agent loop that calls the
   real analysis functions; an offline `ScriptedToolProvider` keeps it fully testable.
   Wired into the Analysis page (tool-capable provider required).
-- [ ] Optional literature grounding (§5.3 #6) — deferred (adds external egress).
+- [x] Optional literature grounding (§5.3 #6) — `literature.py` (Europe PMC,
+  opt-in, generic-keyword queries only); offline-default + monkeypatchable HTTP seam.
 - [ ] CI *bands* on the analysis plots (§3.7) — the numbers exist; the overlays remain.
 
 ---
@@ -365,7 +366,11 @@ baseline — never a hard dependency.
 - **App:** new analysis tables surfaced on the Analysis page; an insight-engine
   selector (offline / Ollama / Anthropic) with egress disclosure; a grounded
   tool-calling Q&A panel; insights bundle folded into the export ZIP.
-- **Docs:** `AGENTS.md` contributor/agent guide; README "AI insights" section.
+- **`literature.py` (new):** opt-in Europe PMC literature grounding —
+  `build_literature_queries` (generic keywords only), `EuropePMCProvider` /
+  `NullLiteratureProvider`, `find_supporting_literature`, markdown/JSON export.
+- **Docs:** `AGENTS.md` contributor/agent guide; README "AI insights" section
+  (incl. a concrete recommended starting model and the literature feature).
 - **Tests:** `test_analysis_advanced.py` (incl. property-recovery), `test_insights.py`,
   `test_insights_agent.py` (offline agent loop), expanded
   baseline/reporting/export/app-smoke coverage.

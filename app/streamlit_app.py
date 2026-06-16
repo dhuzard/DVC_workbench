@@ -47,6 +47,7 @@ from dvc_behavior import (  # noqa: E402
     export as exp_mod,
     insights,
     light_dark,
+    literature as lit_mod,
     metadata as meta_mod,
     parsing,
     provenance,
@@ -115,6 +116,7 @@ def _init_state() -> None:
         "insights_narrative": None,
         "insights_methods": None,
         "qa_result": None,
+        "literature_result": None,
         "quality_report": None,
         "raw_event_file_mapping": {},
         "raw_preview_plot_requested": False,
@@ -2365,6 +2367,12 @@ def _tab_export() -> None:
             insight_artifacts = _build_insight_artifacts(
                 analysis_tables_for_export, analysis_config, manifest, quality_report
             )
+            lit_result = st.session_state.get("literature_result")
+            if lit_result is not None and getattr(lit_result, "references", None):
+                insight_artifacts["insights/literature.md"] = lit_result.to_markdown()
+                insight_artifacts["insights/literature.json"] = lit_mod.literature_payload_json(
+                    lit_result
+                )
             export_kwargs = dict(
                 processed_df=proc,
                 baseline_summary=st.session_state.baseline_summary,
@@ -2917,7 +2925,38 @@ def _render_insights_panel(config_summary: dict) -> None:
         with st.expander("Data-quality triage", expanded=False):
             st.markdown(triage_text)
 
+    _render_literature_panel(payload)
     _render_qa_panel(config_summary)
+
+
+def _render_literature_panel(payload: dict) -> None:
+    """Opt-in literature grounding (Europe PMC).
+
+    Sends only generic topic keywords derived from the *kinds* of findings —
+    never raw data or study labels — and frames results as suggestions to verify.
+    """
+    with st.expander("Related literature (optional)", expanded=False):
+        queries = lit_mod.build_literature_queries(payload)
+        st.caption(
+            "Searches Europe PMC for related work. Only these generic keyword queries leave "
+            "your computer — no data, group names, or file names are sent: "
+            + ", ".join(f"`{q}`" for q in queries)
+        )
+        if st.button("Search Europe PMC", key="lit_search"):
+            with _working_status(
+                "Searching Europe PMC",
+                "Sending generic topic keywords (not your data) to the open Europe PMC API.",
+            ):
+                try:
+                    st.session_state.literature_result = lit_mod.find_supporting_literature(
+                        payload, lit_mod.EuropePMCProvider()
+                    )
+                except RuntimeError as exc:
+                    st.session_state.literature_result = None
+                    st.error(str(exc))
+        result = st.session_state.get("literature_result")
+        if result is not None:
+            st.markdown(result.to_markdown())
 
 
 def _render_qa_panel(config_summary: dict) -> None:

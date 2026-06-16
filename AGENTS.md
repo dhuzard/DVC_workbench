@@ -33,6 +33,7 @@ src/dvc_behavior/
   quality.py provenance.py schemas.py config.py
   analysis.py             # exploratory analytics (table-in/table-out)
   insights.py             # grounded, offline-first LLM narrative + tool-calling Q&A
+  literature.py           # optional Europe PMC literature grounding (opt-in)
 tests/                    # pytest suite (mirrors module names)
 data/examples/            # bundled example CSVs
 docs/ANALYTICS_AND_LLM_REVIEW.md   # the analytics/LLM roadmap + status
@@ -88,6 +89,11 @@ non-negotiable:
    specific Claude model id into code, tests, comments, or committed docs.
 5. **Traceability.** Every output records the provider, model id, and payload hash;
    the export bundle ships `insights/narrative.md` + `insights/payload.json`.
+6. **Literature grounding (`literature.py`)** is opt-in and off by default. Only
+   generic topic keywords (never data, group names, or file names) are sent to
+   Europe PMC; results are framed as suggestions to verify. The default
+   `NullLiteratureProvider` is offline, and tests monkeypatch the `_http_get_json`
+   seam — never hit the network in tests.
 
 ---
 
