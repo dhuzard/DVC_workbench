@@ -6,13 +6,41 @@ All functions return a plotly Figure object.
 
 from __future__ import annotations
 
+import importlib
+import math
+
 import plotly.graph_objects as go
 import plotly.express as px
+import numpy as np
 import pandas as pd
 
 
 _EXCLUSION_BAND_COLOR = "rgba(255, 100, 100, 0.18)"
 _DARK_PHASE_COLOR = "rgba(50, 50, 80, 0.12)"
+
+_NORMAL_Z_975 = 1.959963984540054
+
+
+def confidence_halfwidth(sd: float, n: float, level: float = 0.95) -> float:
+    """Return the t-based confidence-interval half-width for a group mean.
+
+    ``sd`` is the sample standard deviation (ddof=1) across the experimental
+    units (subjects) and ``n`` is the number of units. Uses Student's t when
+    SciPy is available, falling back to the normal approximation. Returns NaN
+    when ``n`` is too small (< 2) for an interval to be defined.
+    """
+    if n is None or not np.isfinite(n) or n <= 1:
+        return float("nan")
+    if sd is None or not np.isfinite(sd):
+        return float("nan")
+    sem = float(sd) / math.sqrt(int(n))
+    try:
+        stats = importlib.import_module("scipy.stats")
+        crit = float(stats.t.ppf(0.5 + level / 2.0, int(n) - 1))
+    except Exception:
+        crit = _NORMAL_Z_975
+    return crit * sem
+
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +215,17 @@ def plot_group_mean_timeseries(
     metric_name: str,
     y_col: str = "value",
     groups: list[str] | None = None,
+    band: str = "ci95",
+    min_n: int = 3,
 ) -> go.Figure:
-    """Plot group-mean ± SEM aligned timeseries."""
+    """Plot group-mean aligned timeseries with a confidence band.
+
+    ``band`` selects the shaded interval: ``"ci95"`` (Student's t 95% CI over
+    subjects, the default), ``"sem"`` (standard error), or ``"none"``. Means and
+    intervals are computed over **per-subject** means when ``subject_id`` is
+    present, so the band reflects between-animal variability rather than the
+    number of raw bins. Time bins with fewer than ``min_n`` subjects are marked.
+    """
     sub_df = df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
 
     if "time_from_event_hours" not in sub_df.columns or sub_df["time_from_event_hours"].isna().all():
@@ -223,14 +260,38 @@ def plot_group_mean_timeseries(
 
     sub_df["_t_bin"] = (sub_df["time_from_event_hours"] / native_h).round() * native_h
 
+    # Aggregate to the experimental unit (subject) before summarizing, so the
+    # band reflects between-animal variability rather than raw-bin count.
+    has_subjects = "subject_id" in sub_df.columns
+    if has_subjects:
+        unit = (
+            sub_df.groupby(["_t_bin", label_col, "subject_id"])[y_col]
+            .mean()
+            .reset_index()
+        )
+    else:
+        unit = sub_df[["_t_bin", label_col, y_col]].copy()
+
     grp_stats = (
-        sub_df.groupby(["_t_bin", label_col])[y_col]
-        .agg(["mean", "sem", "count"])
+        unit.groupby(["_t_bin", label_col])[y_col]
+        .agg(grp_mean="mean", grp_sd=lambda s: s.std(ddof=1), n="count")
         .reset_index()
-        .rename(columns={"mean": "grp_mean", "sem": "grp_sem", "count": "n"})
     )
     if grp_stats.empty:
         return go.Figure(layout=dict(title="No group-mean data after aggregation."))
+
+    grp_stats["grp_sem"] = grp_stats.apply(
+        lambda r: (r["grp_sd"] / math.sqrt(int(r["n"]))) if r["n"] and r["n"] > 1 else float("nan"),
+        axis=1,
+    )
+    grp_stats["grp_ci95"] = grp_stats.apply(
+        lambda r: confidence_halfwidth(r["grp_sd"], r["n"]), axis=1
+    )
+
+    band = (band or "ci95").lower()
+    half_col = {"ci95": "grp_ci95", "sem": "grp_sem", "none": None}.get(band, "grp_ci95")
+    band_label = {"ci95": "95% CI", "sem": "SEM", "none": "mean only"}.get(band, "95% CI")
+    unit_label = "subjects" if has_subjects else "observations"
 
     fig = go.Figure()
     color_cycle = px.colors.qualitative.Plotly
@@ -238,36 +299,46 @@ def plot_group_mean_timeseries(
         color = color_cycle[i % len(color_cycle)]
         grp_data = grp_data.sort_values("_t_bin")
 
-        # Shaded SEM band
-        fig.add_trace(
-            go.Scatter(
-                x=pd.concat([grp_data["_t_bin"], grp_data["_t_bin"][::-1]]),
-                y=pd.concat(
-                    [
-                        grp_data["grp_mean"] + grp_data["grp_sem"],
-                        (grp_data["grp_mean"] - grp_data["grp_sem"])[::-1],
-                    ]
-                ),
-                fill="toself",
-                fillcolor=color.replace("rgb", "rgba").replace(")", ", 0.2)"),
-                line=dict(color="rgba(255,255,255,0)"),
-                showlegend=False,
-                hoverinfo="skip",
+        if half_col is not None:
+            half = grp_data[half_col].fillna(0.0)
+            upper = grp_data["grp_mean"] + half
+            lower = grp_data["grp_mean"] - half
+            fig.add_trace(
+                go.Scatter(
+                    x=pd.concat([grp_data["_t_bin"], grp_data["_t_bin"][::-1]]),
+                    y=pd.concat([upper, lower[::-1]]),
+                    fill="toself",
+                    fillcolor=color.replace("rgb", "rgba").replace(")", ", 0.2)"),
+                    line=dict(color="rgba(255,255,255,0)"),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
             )
-        )
+        # Hollow markers flag bins with too few units for a reliable interval.
+        low_n = grp_data["n"] < min_n
         fig.add_trace(
             go.Scatter(
                 x=grp_data["_t_bin"],
                 y=grp_data["grp_mean"],
-                mode="lines",
+                mode="lines+markers",
                 name=str(grp_label),
                 line=dict(color=color, width=2),
+                marker=dict(
+                    color=np.where(low_n, "rgba(255,255,255,0)", color),
+                    line=dict(color=color, width=1),
+                    size=6,
+                ),
+                customdata=grp_data["n"],
+                hovertemplate=(
+                    f"%{{y:.3g}} ± {band_label}<br>n=%{{customdata}} {unit_label}<extra>"
+                    f"{grp_label}</extra>"
+                ),
             )
         )
 
     fig.add_vline(x=0, line_dash="dash", line_color="grey", annotation_text="J0")
     fig.update_layout(
-        title=f"Group mean ± SEM – {metric_name} ({y_col})",
+        title=f"Group mean ± {band_label} – {metric_name} ({y_col})",
         xaxis_title="Time from event (h)",
         yaxis_title=metric_name,
         hovermode="x unified",

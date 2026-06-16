@@ -221,6 +221,44 @@ def test_circadian_profile_works_with_raw_processed_values():
     assert streamlit_app._circadian_profile_issue(df, value_col="value", max_days=1) is None
 
 
+def test_circadian_profile_reports_ci_and_plot_bands(monkeypatch):
+    from app import streamlit_app
+
+    # _plot_circadian_profile reads the light cycle from session_state via
+    # _dark_onset_zt; stub it so the test needs no Streamlit runtime.
+    monkeypatch.setattr(streamlit_app, "_dark_onset_zt", lambda: 12.0)
+
+    rows = []
+    for subj, base in [("A1", 1.0), ("A2", 2.0), ("A3", 3.0)]:
+        for zt, ts in [(0.0, "2025-01-01 07:00"), (6.0, "2025-01-01 13:00")]:
+            rows.append(
+                {
+                    "group_id": "A",
+                    "subject_id": subj,
+                    "timestamp_local": pd.Timestamp(ts, tz="Europe/Paris"),
+                    "zeitgeber_time_hours": zt,
+                    "value": base + zt,
+                }
+            )
+    df = pd.DataFrame(rows)
+
+    profile = streamlit_app._circadian_profile(
+        df, value_col="value", max_days=1, zt_bin_hours=6.0, normalize_mode="Raw values"
+    )
+    assert "ci95" in profile.columns
+    assert "n" in profile.columns
+    # 3 subjects with spread → finite CI that is wider than the SEM.
+    assert (profile["ci95"] >= profile["sem"]).all()
+    assert (profile["ci95"] > 0).any()
+
+    ci_fig = streamlit_app._plot_circadian_profile(profile, value_label="value", band="ci95")
+    none_fig = streamlit_app._plot_circadian_profile(profile, value_label="value", band="none")
+    # One group → CI adds a band trace (2 traces) vs mean-only (1 trace).
+    assert len(ci_fig.data) == 2
+    assert len(none_fig.data) == 1
+    assert "95% CI" in ci_fig.layout.title.text
+
+
 def test_circadian_profile_issue_names_missing_requirements():
     from app import streamlit_app
 
