@@ -117,7 +117,7 @@ ruff check .
 | Baseline & Aggregation | Configure baseline window, optional group-mean imputation/overrides, and run the pipeline |
 | QC Plots | Review raw/aligned plots, baseline quality heatmap, irregular-bin report, and group means |
 | Export | Download a ZIP with processed data, config, metadata, reports, and optional analysis outputs |
-| Analysis | Generate exploratory circadian, binned, AUC, and quick-statistics summaries |
+| Analysis | Generate exploratory circadian (cosinor + rhythmicity test, IS/IV/RA, period), binned, AUC, bout/fragmentation, estimation-first statistics, and plain-language insight summaries |
 
 ---
 
@@ -166,15 +166,20 @@ Known event values: `REMOVED`, `INSERTED`, `CAGE_OFFLINE`, `CAGE_ONLINE`.
 | `treatment_schedule.csv` | Editable treatment/dosing schedule, when provided |
 | `facility_events.csv` | Facility-level confound calendar, when provided |
 | `daily_means.csv` | Group mean ± SEM by selected analysis time bin |
-| `circadian_summary.csv` | Cosinor MESOR, amplitude, acrophase, R2, and phase |
+| `circadian_summary.csv` | Cosinor MESOR, amplitude, acrophase, R2, phase, plus a zero-amplitude rhythmicity p-value and amplitude/acrophase confidence intervals |
+| `nonparametric_circadian.csv` | Distribution-free IS, IV, RA, M10, and L5 per subject |
+| `period_estimate.csv` | Per-subject Lomb–Scargle dominant period (free-running / tau designs) |
+| `activity_bouts.csv` | Per-subject active/inactive bout counts, durations, and fraction time active |
 | `light_dark_summary.csv` | Light/dark group summaries and dark/light ratio |
 | `quality_report.csv` | Per-subject/metric quality diagnostics |
 | `auc_summary.csv` | Per-animal trapezoidal AUC values for the selected window |
-| `stats_summary.csv` | Exploratory p-values, FDR q-values, effect sizes, labels, and statistical notes |
+| `stats_summary.csv` | Estimation-first comparisons: median difference + bootstrap CI, effect sizes + CI, exploratory p/FDR q-values, small-sample warnings, and statistical notes |
 | `analysis_config.yaml` | All parameters used for this run |
 | `manifest.yaml` | Input file hashes, row counts, selected config, and app version |
 | `processing_report.md` | Human-readable run summary |
 | `metadata_validation_report.md` | Metadata quality summary |
+| `insights/narrative.md` | Grounded plain-language interpretation of the summary tables (offline by default) + draft Methods paragraph |
+| `insights/payload.json` | The exact aggregated payload the narrative was generated from (traceability; no raw time series) |
 
 ---
 
@@ -198,6 +203,8 @@ dvc-behavioral-preprocessing-workbench/
 │       ├── baseline.py           # Baseline calculation
 │       ├── aggregation.py        # Optional coarser binning
 │       ├── analysis.py           # Exploratory analysis helpers
+│       ├── insights.py           # Grounded, offline-first LLM insights & Q&A
+│       ├── literature.py         # Optional Europe PMC literature grounding
 │       ├── api_adapter.py        # Future direct DVC API placeholder
 │       ├── qc.py                 # Plotly QC figures
 │       ├── export.py             # ZIP export builder
@@ -219,9 +226,62 @@ dvc-behavioral-preprocessing-workbench/
 - **subject_id may be a cage label,** not necessarily a biological animal ID. Keep both `subject_id` (detected) and `animal_id` (user-defined) separate.
 - **Baseline is per subject and per metric.** Group-level baselines are not computed; group means are derived from individual subjects.
 - **Exclusions are traceable.** Every excluded row carries its reason in `exclusion_reason`. Excluded rows are retained in the output with `is_excluded=True`.
-- **Exploratory statistics only.** P-values and group comparisons in the app are orientation tools, not confirmatory inference.
-- **Light/dark annotation uses local time.** The user selects a timezone (default: `Europe/Paris`). ZT0 = lights-on time.
+- **Exploratory statistics only.** P-values and group comparisons in the app are orientation tools, not confirmatory inference. Statistics are estimation-first: read the effect/difference with its confidence interval and the sample sizes before any p-value, and heed the `small_n_warning` flag (when groups are too small for the test to ever reach significance).
+- **Light/dark annotation uses local time.** The user selects a timezone (default: `Europe/Paris`). ZT0 = lights-on time. The cosinor phase split honours the configured photoperiod (not a fixed 12:12).
+- **Near-zero baselines are guarded.** Percent-change is not computed when the baseline magnitude is below a small floor; affected rows are flagged via `baseline_percent_change_unstable` so low-activity (e.g. light-phase) baselines cannot inflate group means.
 - **Imputed baselines are flagged.** Group-mean baseline imputation is optional and sets `baseline_imputed=True`.
+- **AI insights are grounded and local-first.** The optional plain-language narrative interprets only the small aggregated summary tables — never your raw time series — and runs fully offline by default (no network, no API key). A local model (Ollama) or a bring-your-own-key cloud model (Anthropic Claude) can be used as an opt-in enhancement; when chosen, only the summary tables are sent. Every narrative records the model and a hash of its input payload for traceability, and always carries the exploratory disclaimer.
+
+---
+
+## AI insights (optional)
+
+The **Analysis** page can turn the summary tables into readable, caveated prose and
+answer questions about your data. This layer is designed around the same
+local-first promise as the rest of the workbench.
+
+**Plain-language narrative.** Pick an *Insight engine*:
+
+| Engine | What leaves your computer | Needs |
+|--------|---------------------------|-------|
+| **Offline** (default) | Nothing — a deterministic template runs locally | Nothing |
+| **Local model via Ollama** | Only the aggregated summary tables, to your local Ollama server | A running [Ollama](https://ollama.com) + a model |
+| **Anthropic Claude** | Only the aggregated summary tables, to Anthropic's API | An API key + a Claude model id |
+
+The offline narrative renders immediately and is always the version written to the
+export bundle. Model engines run only when you click **Generate**, after an explicit
+note of exactly what is sent. Results show the model id, token usage, and the payload
+hash for traceability.
+
+**Ask a question (grounded Q&A).** With a tool-capable model selected (Anthropic
+Claude), the **Ask a question about your data** panel answers by *calling the real
+analysis functions on your processed data and interpreting the returned tables* — it
+never fabricates numbers. The answer lists which analysis tools it ran for full
+transparency.
+
+**Key / model configuration.** No model id is hardcoded. Paste the Claude model id of
+your choice in the UI, and set the key in the field or via the `ANTHROPIC_API_KEY`
+environment variable. The optional `anthropic` / `requests` packages are imported lazily,
+so the offline path needs neither.
+
+> **Recommended starting model:** **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`) —
+> fast and inexpensive, and since the payloads are just small summary tables it produces
+> a solid narrative. Step up to **Claude Sonnet 4.6** (`claude-sonnet-4-6`) for richer
+> synthesis, or a **Claude Opus** model for the most detailed multi-table reasoning and
+> the grounded Q&A. (Use the latest available version of whichever tier you pick.)
+
+**Related literature (optional).** The insights panel can search
+[Europe PMC](https://europepmc.org) for work related to your analysis. It is **off by
+default**; when you run it, only a few **generic topic keywords** (e.g.
+`circadian rhythm locomotor activity rodent`) derived from the *kinds* of results are
+sent — never your data, group names, or file names. The exact queries are shown before
+you search, and results are framed as suggestions to verify, not as evidence. Needs the
+`requests` package (already a dependency) and network access.
+
+The export ZIP always contains `insights/narrative.md` (offline narrative + draft
+Methods paragraph) and `insights/payload.json` (the exact aggregated input, for audit).
+If you fetched references, it also includes `insights/literature.md` and
+`insights/literature.json`.
 
 ---
 

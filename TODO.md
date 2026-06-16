@@ -496,6 +496,35 @@ tests/
 - Run on port 8502 to avoid conflict with existing app on 8501:
   `streamlit run app/streamlit_app.py --server.port 8502`
 
+## Session notes (2026-06-15) — analytics depth + grounded LLM insights
+
+- Acted on `docs/ANALYTICS_AND_LLM_REVIEW.md`. Implemented Phases 1–3 plus
+  period estimation (Phase 4):
+  - `analysis.py`: cosinor rhythmicity F-test (`p_rhythm`) + amplitude/acrophase
+    CIs + subject-level fit; configurable photoperiod; estimation-first stats
+    (median difference + bootstrap CI, effect-size CI, `min_possible_p`,
+    `small_n_warning`); new `summarize_nonparametric_circadian` (IS/IV/RA/M10/L5),
+    `summarize_activity_bouts`, `compare_window_summaries`, `estimate_period`
+    (Lomb–Scargle). All additive — legacy columns/signatures preserved.
+  - `baseline.py`: near-zero percent-change guard + `baseline_percent_change_unstable`.
+  - `reporting.py`: removed the stale `%Human` timestamp line.
+  - `insights.py` (new): offline-first grounded narrative layer
+    (`build_insight_payload`, `NullProvider`, Ollama/Anthropic providers, Methods
+    drafter, QC triage, tool registry). The model only ever sees aggregated
+    summary tables, never raw time series; every output is hashed for traceability.
+  - `export.py`: generic `text_artifacts` channel → `insights/` bundle in the ZIP.
+  - App: new analysis tables + offline insights panel on the Analysis page.
+- Follow-up (2026-06-16): added the insight-engine selector (offline / Ollama /
+  Anthropic) with egress disclosure, and a grounded tool-calling Q&A loop
+  (`build_tool_specs`, `execute_analysis_tool`, `answer_question`,
+  `AnthropicToolProvider`, offline `ScriptedToolProvider`) wired into the Analysis
+  page. Added `AGENTS.md` and a README "AI insights" section.
+- Follow-up (2026-06-16): added optional literature grounding (`literature.py`,
+  Europe PMC, opt-in, generic-keyword queries only, offline-default) wired into the
+  insights panel and export bundle; added a concrete recommended starting model to
+  the README.
+- Remaining open items: CI bands on the analysis plots.
+
 ## Session notes (2026-05-07)
 
 - v0.2 hardening (Workstreams A–D) verified end-to-end: provenance manifest,

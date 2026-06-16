@@ -17,7 +17,6 @@ def generate_processing_report(
     warnings: list[str],
     analysis_config: dict[str, Any],
 ) -> str:
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %Human:%M:%S UTC").replace("Human", "").strip()
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     lines: list[str] = [

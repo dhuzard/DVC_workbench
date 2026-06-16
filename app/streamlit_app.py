@@ -45,7 +45,9 @@ from dvc_behavior import (  # noqa: E402
     events as ev_mod,
     exclusions,
     export as exp_mod,
+    insights,
     light_dark,
+    literature as lit_mod,
     metadata as meta_mod,
     parsing,
     provenance,
@@ -110,6 +112,11 @@ def _init_state() -> None:
         "analysis_tables": {},
         "analysis_figures": {},
         "analysis_warning": "",
+        "insights_payload": None,
+        "insights_narrative": None,
+        "insights_methods": None,
+        "qa_result": None,
+        "literature_result": None,
         "quality_report": None,
         "raw_event_file_mapping": {},
         "raw_preview_plot_requested": False,
@@ -2357,6 +2364,15 @@ def _tab_export() -> None:
             ),
         ):
             estimated_bytes = int(proc.memory_usage(deep=True).sum()) if proc is not None else 0
+            insight_artifacts = _build_insight_artifacts(
+                analysis_tables_for_export, analysis_config, manifest, quality_report
+            )
+            lit_result = st.session_state.get("literature_result")
+            if lit_result is not None and getattr(lit_result, "references", None):
+                insight_artifacts["insights/literature.md"] = lit_result.to_markdown()
+                insight_artifacts["insights/literature.json"] = lit_mod.literature_payload_json(
+                    lit_result
+                )
             export_kwargs = dict(
                 processed_df=proc,
                 baseline_summary=st.session_state.baseline_summary,
@@ -2373,6 +2389,7 @@ def _tab_export() -> None:
                 analysis_tables=analysis_tables_for_export,
                 figures=st.session_state.analysis_figures,
                 manifest=manifest,
+                text_artifacts=insight_artifacts,
             )
             if estimated_bytes > 500_000_000:
                 tmp_dir = Path(tempfile.mkdtemp(prefix="dvc_export_"))
@@ -2591,7 +2608,23 @@ def _tab_analysis() -> None:
         stats, stats_warns = (
             analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
         )
-        analysis_warns = circ_warns + phase_warns + bin_warns + auc_warns + stats_warns
+        nonparam_circadian, np_circ_warns = analysis.summarize_nonparametric_circadian(
+            metric_df, value_col="value"
+        )
+        activity_bouts, bout_warns = analysis.summarize_activity_bouts(
+            metric_df, value_col="value"
+        )
+        period_estimate, period_warns = analysis.estimate_period(metric_df, value_col="value")
+        analysis_warns = (
+            circ_warns
+            + phase_warns
+            + bin_warns
+            + auc_warns
+            + stats_warns
+            + np_circ_warns
+            + bout_warns
+            + period_warns
+        )
         circadian_profile = _circadian_profile(
             metric_df,
             value_col=sel_value,
@@ -2609,6 +2642,9 @@ def _tab_analysis() -> None:
         "daily_means.csv": time_bins,
         "circadian_summary.csv": circadian,
         "circadian_profile.csv": circadian_profile,
+        "nonparametric_circadian.csv": nonparam_circadian,
+        "activity_bouts.csv": activity_bouts,
+        "period_estimate.csv": period_estimate,
         "light_dark_summary.csv": phase,
         "auc_summary.csv": auc,
         "stats_summary.csv": stats,
@@ -2678,6 +2714,307 @@ def _tab_analysis() -> None:
         st.caption("Statistics table is empty. AUC needs at least one plottable animal per group.")
     else:
         st.dataframe(stats, width="stretch", hide_index=True)
+        st.caption(
+            "Estimation-first: read `median_difference` with `diff_ci_low`/`diff_ci_high` and "
+            "the sample sizes first. When `small_n_warning` is true the groups are too small for "
+            "the test to ever reach significance, so a non-significant p is uninformative."
+        )
+
+    with st.expander("Non-parametric circadian metrics (IS / IV / RA, M10 / L5)", expanded=False):
+        st.caption(
+            "Distribution-free rhythm descriptors that do not assume a sinusoid: interdaily "
+            "stability (IS), intradaily variability (IV), and relative amplitude (RA) from the "
+            "most-active 10 h (M10) and least-active 5 h (L5)."
+        )
+        if nonparam_circadian.empty:
+            st.caption("Needs multi-day, timestamped activity per subject.")
+        else:
+            st.dataframe(nonparam_circadian, width="stretch", hide_index=True)
+
+    with st.expander("Activity bouts & fragmentation", expanded=False):
+        if activity_bouts.empty:
+            st.caption("Needs timestamped activity per subject.")
+        else:
+            st.dataframe(activity_bouts, width="stretch", hide_index=True)
+
+    with st.expander("Period estimate (Lomb–Scargle)", expanded=False):
+        st.caption("Dominant period per subject for free-running / tau designs.")
+        if period_estimate.empty:
+            st.caption("Needs timestamped activity per subject.")
+        else:
+            st.dataframe(period_estimate, width="stretch", hide_index=True)
+
+    _render_insights_panel(analysis_config_for_insights())
+
+
+def _build_insight_artifacts(
+    analysis_tables: dict,
+    analysis_config: dict,
+    manifest: dict,
+    quality_report,
+) -> dict[str, str]:
+    """Build the traceable, offline insights bundle written under ``insights/``."""
+    import json
+
+    if not analysis_tables:
+        return {}
+    tables = {
+        name[:-4] if name.endswith(".csv") else name: df
+        for name, df in analysis_tables.items()
+    }
+    payload = insights.build_insight_payload(
+        tables,
+        analysis_config=analysis_config,
+        manifest=manifest,
+        quality_report=quality_report,
+    )
+    result = insights.generate_narrative(payload)
+    methods = insights.draft_methods_section(analysis_config, manifest=manifest)
+    return {
+        "insights/narrative.md": (
+            f"{result.text}\n\n---\n\n## Methods (draft)\n\n{methods}\n\n"
+            f"_Provider: {result.provider} ({result.model_id}); "
+            f"payload sha256: {result.payload_sha256}; generated {result.generated_at}._\n"
+        ),
+        "insights/payload.json": json.dumps(payload, indent=2, sort_keys=True),
+    }
+
+
+def analysis_config_for_insights() -> dict:
+    """Compact config summary used for grounded insight narratives and Methods drafts."""
+    return {
+        "timezone": st.session_state.get("timezone"),
+        "light_dark_cycle": {
+            "light_on": st.session_state.get("light_on"),
+            "light_off": st.session_state.get("light_off"),
+        },
+        "app_version": cfg.APP_VERSION,
+    }
+
+
+_INSIGHT_OFFLINE = "Offline — nothing leaves this computer (default)"
+_INSIGHT_OLLAMA = "Local model via Ollama (stays on your machine)"
+_INSIGHT_ANTHROPIC = "Anthropic Claude (bring your own API key)"
+
+
+def _insights_provider_controls(key_prefix: str) -> tuple[str, dict]:
+    """Render the insight-engine selector and return (choice, provider_kwargs)."""
+    choice = st.radio(
+        "Insight engine",
+        [_INSIGHT_OFFLINE, _INSIGHT_OLLAMA, _INSIGHT_ANTHROPIC],
+        key=f"{key_prefix}_provider",
+        help=(
+            "Offline uses a deterministic template — no network, no key. The model "
+            "options only ever receive the small aggregated summary tables, never your "
+            "raw time series."
+        ),
+    )
+    kwargs: dict = {}
+    if choice == _INSIGHT_OLLAMA:
+        col_a, col_b = st.columns(2)
+        kwargs["model"] = col_a.text_input(
+            "Ollama model", value="llama3.1", key=f"{key_prefix}_ollama_model"
+        )
+        kwargs["host"] = col_b.text_input(
+            "Ollama host", value="http://localhost:11434", key=f"{key_prefix}_ollama_host"
+        )
+    elif choice == _INSIGHT_ANTHROPIC:
+        col_a, col_b = st.columns(2)
+        kwargs["model"] = col_a.text_input(
+            "Claude model id",
+            value="",
+            placeholder="paste the latest Claude model id",
+            key=f"{key_prefix}_claude_model",
+        )
+        kwargs["api_key"] = col_b.text_input(
+            "API key",
+            value="",
+            type="password",
+            key=f"{key_prefix}_claude_key",
+            help="Left blank, the ANTHROPIC_API_KEY environment variable is used. Sent only to Anthropic.",
+        )
+    return choice, kwargs
+
+
+def _insights_egress_note(choice: str) -> str:
+    if choice == _INSIGHT_OLLAMA:
+        return "On generate, the summary tables are sent to your local Ollama server only."
+    if choice == _INSIGHT_ANTHROPIC:
+        return "On generate, the summary tables (never raw data) are sent to Anthropic's API."
+    return "Runs fully offline — nothing leaves this computer."
+
+
+def _make_narrative_provider(choice: str, kwargs: dict):
+    """Build the chosen narrative provider, or None for the offline default."""
+    if choice == _INSIGHT_OLLAMA:
+        return insights.OllamaProvider(model=kwargs.get("model") or "llama3.1", host=kwargs.get("host"))
+    if choice == _INSIGHT_ANTHROPIC:
+        model = (kwargs.get("model") or "").strip()
+        if not model:
+            raise ValueError("Enter a Claude model id to use the Anthropic engine.")
+        return insights.AnthropicProvider(model=model, api_key=(kwargs.get("api_key") or None))
+    return None
+
+
+def _render_insights_panel(config_summary: dict) -> None:
+    """Grounded, offline-first narrative over the computed analysis tables.
+
+    The summary tables — never the raw time series — are turned into a compact
+    payload that an interpretation layer describes in plain language. The default
+    path runs fully offline (no network, no API key) so it always works; local
+    (Ollama) and BYO-key cloud (Anthropic) providers are optional enhancements.
+    """
+    st.subheader("Plain-language insights")
+    st.caption(
+        "Turns the summary tables above into a readable, caveated narrative. Runs offline by "
+        "default — only the small aggregated tables (never your raw data) are ever sent if you "
+        "choose a model provider."
+    )
+
+    tables = {
+        name[:-4] if name.endswith(".csv") else name: df
+        for name, df in st.session_state.analysis_tables.items()
+    }
+    quality_report = st.session_state.get("quality_report")
+    payload = insights.build_insight_payload(
+        tables,
+        analysis_config=config_summary,
+        quality_report=quality_report,
+    )
+    st.session_state.insights_payload = payload
+
+    choice, provider_kwargs = _insights_provider_controls("narrative")
+    st.caption(_insights_egress_note(choice))
+
+    if choice == _INSIGHT_OFFLINE:
+        result = insights.generate_narrative(payload)
+        st.markdown(result.text)
+        st.session_state.insights_narrative = result
+    else:
+        if st.button(f"Generate narrative with {choice.split(' —')[0].split(' (')[0]}", type="primary"):
+            with _working_status(
+                "Generating model narrative",
+                "Sending the aggregated summary tables (not raw data) to the selected model.",
+            ):
+                try:
+                    provider = _make_narrative_provider(choice, provider_kwargs)
+                    result = insights.generate_narrative(payload, provider)
+                    st.session_state.insights_narrative = result
+                except (RuntimeError, ValueError) as exc:
+                    st.session_state.insights_narrative = None
+                    st.error(str(exc))
+        saved = st.session_state.get("insights_narrative")
+        if saved is not None and saved.provider != "null":
+            st.markdown(saved.text)
+            usage = []
+            if saved.prompt_tokens is not None:
+                usage.append(f"{saved.prompt_tokens} in / {saved.completion_tokens} out tokens")
+            usage.append(f"model `{saved.model_id}`")
+            usage.append(f"payload `{saved.payload_sha256[:12]}…`")
+            st.caption("Provenance: " + " · ".join(usage))
+        else:
+            st.caption("Configure the engine above and click generate. The offline summary is still exported.")
+
+    methods = insights.draft_methods_section(config_summary)
+    with st.expander("Draft methods paragraph", expanded=False):
+        st.markdown(methods)
+    st.session_state.insights_methods = methods
+
+    if quality_report is not None and not getattr(quality_report, "empty", True):
+        triage_text, _issues = insights.triage_quality(quality_report)
+        with st.expander("Data-quality triage", expanded=False):
+            st.markdown(triage_text)
+
+    _render_literature_panel(payload)
+    _render_qa_panel(config_summary)
+
+
+def _render_literature_panel(payload: dict) -> None:
+    """Opt-in literature grounding (Europe PMC).
+
+    Sends only generic topic keywords derived from the *kinds* of findings —
+    never raw data or study labels — and frames results as suggestions to verify.
+    """
+    with st.expander("Related literature (optional)", expanded=False):
+        queries = lit_mod.build_literature_queries(payload)
+        st.caption(
+            "Searches Europe PMC for related work. Only these generic keyword queries leave "
+            "your computer — no data, group names, or file names are sent: "
+            + ", ".join(f"`{q}`" for q in queries)
+        )
+        if st.button("Search Europe PMC", key="lit_search"):
+            with _working_status(
+                "Searching Europe PMC",
+                "Sending generic topic keywords (not your data) to the open Europe PMC API.",
+            ):
+                try:
+                    st.session_state.literature_result = lit_mod.find_supporting_literature(
+                        payload, lit_mod.EuropePMCProvider()
+                    )
+                except RuntimeError as exc:
+                    st.session_state.literature_result = None
+                    st.error(str(exc))
+        result = st.session_state.get("literature_result")
+        if result is not None:
+            st.markdown(result.to_markdown())
+
+
+def _render_qa_panel(config_summary: dict) -> None:
+    """Grounded, tool-calling Q&A over the processed data.
+
+    The assistant answers numeric questions by CALLING the real ``analysis``
+    functions on the processed table and interpreting the returned results — it
+    never fabricates numbers. Only the small computed result tables (not the raw
+    series) are returned to the model. Requires a tool-capable cloud model.
+    """
+    if not hasattr(insights, "answer_question"):
+        return
+
+    st.markdown("#### Ask a question about your data")
+    st.caption(
+        "A tool-calling assistant answers by running the real analysis functions on your "
+        "processed data and interpreting the results — it never invents numbers. Requires a "
+        "tool-capable cloud model (Anthropic Claude)."
+    )
+
+    proc = st.session_state.get("processed_df")
+    if proc is None or getattr(proc, "empty", True):
+        st.caption("Run the pipeline first so there is processed data to query.")
+        return
+
+    choice, kwargs = _insights_provider_controls("qa")
+    if choice != _INSIGHT_ANTHROPIC:
+        st.info("Q&A needs a tool-capable model. Select 'Anthropic Claude' above to enable it.")
+        return
+
+    question = st.text_input(
+        "Your question",
+        key="qa_question",
+        placeholder="e.g. Which group had higher dark-phase activity, and by how much?",
+    )
+    if st.button("Ask", key="qa_ask") and question.strip():
+        with _working_status(
+            "Answering with tool calls",
+            "The assistant is calling analysis functions on your data and interpreting the results.",
+        ):
+            try:
+                model = (kwargs.get("model") or "").strip()
+                if not model:
+                    raise ValueError("Enter a Claude model id to ask a question.")
+                provider = insights.AnthropicToolProvider(model=model, api_key=(kwargs.get("api_key") or None))
+                st.session_state.qa_result = insights.answer_question(question.strip(), proc, provider)
+            except (RuntimeError, ValueError) as exc:
+                st.session_state.qa_result = None
+                st.error(str(exc))
+
+    qa = st.session_state.get("qa_result")
+    if qa is not None:
+        st.markdown(qa.answer)
+        if qa.tool_calls:
+            with st.expander(f"Tools the assistant ran ({len(qa.tool_calls)})", expanded=False):
+                for call in qa.tool_calls:
+                    st.markdown(f"- `{call.get('name')}` with `{call.get('arguments', {})}`")
+        st.caption(f"Provenance: model `{qa.model_id}`, {qa.steps} reasoning step(s).")
 
 
 # ---------------------------------------------------------------------------

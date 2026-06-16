@@ -10,6 +10,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+# Minimum absolute baseline value for which a percent-change is considered
+# numerically stable. Light-phase locomotion baselines are frequently
+# near-zero; dividing by them makes ``baseline_percent_change`` explode to
+# thousands of percent and dominate group means. When the absolute baseline is
+# below this floor we set the percent change to NaN and flag the row as
+# unstable instead. The default is small enough not to affect typical activity
+# counts but large enough to catch the degenerate near-zero case.
+DEFAULT_BASELINE_EPSILON = 1e-3
+
 
 def compute_baseline(
     df: pd.DataFrame,
@@ -20,6 +29,7 @@ def compute_baseline(
     min_coverage: float = 0.7,
     impute_from_group_mean: bool = False,
     baseline_overrides: pd.DataFrame | None = None,
+    epsilon: float = DEFAULT_BASELINE_EPSILON,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """
     Compute per-(subject_id, metric_name) baseline values and attach them to df.
@@ -36,6 +46,13 @@ def compute_baseline(
         valid group/metric baselines and marked with baseline_imputed=True
     baseline_overrides : optional table with subject_id, metric_name, baseline_value
         for manual per-animal baseline overrides
+    epsilon          : small-denominator floor for the percent-change guard.
+        When ``abs(baseline_value) < epsilon`` the percent change is undefined
+        (near-zero baselines make it explode), so ``baseline_percent_change``
+        is set to NaN and ``baseline_percent_change_unstable`` is set to True
+        for those rows. The absolute ``baseline_corrected_value`` is still
+        computed because it is well-defined even near zero. Defaults to
+        ``DEFAULT_BASELINE_EPSILON``.
 
     Returns
     -------
@@ -183,10 +200,20 @@ def compute_baseline(
     val = pd.to_numeric(df["value"], errors="coerce")
 
     df["baseline_corrected_value"] = val - bv
-    # Percent change: 100 * (value - baseline) / baseline, safe divide
+    # Percent change: 100 * (value - baseline) / baseline, with a
+    # near-zero guard. Exact-zero is not enough: near-zero baselines (common
+    # for light-phase locomotion) make the ratio explode. When the absolute
+    # baseline is below `epsilon` we do not divide; the percent change is NaN
+    # and the row is flagged unstable. The absolute corrected value above
+    # remains well-defined and intact.
+    stable = bv.abs() >= epsilon
     with np.errstate(divide="ignore", invalid="ignore"):
-        pct = np.where(bv != 0, 100.0 * (val - bv) / bv, np.nan)
+        pct = np.where(stable, 100.0 * (val - bv) / bv, np.nan)
     df["baseline_percent_change"] = pct
+    # Only finite near-zero baselines are "unstable"; a NaN baseline is simply
+    # missing, not near-zero, so it stays False (the default).
+    unstable = bv.notna() & (bv.abs() < epsilon)
+    df["baseline_percent_change_unstable"] = unstable.to_numpy()
 
     summary_df = pd.DataFrame(summary_rows) if summary_rows else pd.DataFrame()
     return df, summary_df, warns
@@ -271,3 +298,6 @@ def _add_empty_baseline_cols(df: pd.DataFrame) -> None:
         "baseline_percent_change",
     ):
         df[col] = np.nan
+    # Boolean flag column defaults to False (no rows are near-zero-unstable
+    # when no baseline was computed).
+    df["baseline_percent_change_unstable"] = False

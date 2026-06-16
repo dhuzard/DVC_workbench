@@ -209,6 +209,31 @@ class TestCreateExportZip:
         # The processing_timestamp will differ, so just check sizes are similar
         assert abs(len(data1) - len(data2)) < 100
 
+    def test_text_artifacts_written_verbatim(self):
+        data = create_export_zip(
+            processed_df=None,
+            baseline_summary=None,
+            exclusion_log=None,
+            event_table=None,
+            subject_metadata=None,
+            group_metadata=None,
+            study_metadata={},
+            analysis_config=None,
+            processing_report=None,
+            metadata_validation_report=None,
+            text_artifacts={
+                "insights/narrative.md": "# Narrative\n\nGroup KO differs.",
+                "insights/payload.json": '{"a": 1}',
+                "insights/empty.txt": "",  # falsy → skipped
+            },
+        )
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = set(zf.namelist())
+            assert "insights/narrative.md" in names
+            assert "insights/payload.json" in names
+            assert "insights/empty.txt" not in names
+            assert zf.read("insights/narrative.md").decode().startswith("# Narrative")
+
 
 class TestGenerateProcessingReport:
     def test_returns_string(self):

@@ -150,6 +150,7 @@ OUTPUT_COLUMN_GLOSSARY = [
     ("baseline_coverage", "Fraction of expected baseline bins present for subject/metric.", "Baseline"),
     ("baseline_corrected_value", "Raw value minus baseline value.", "Baseline"),
     ("baseline_percent_change", "Percent change from baseline value.", "Baseline"),
+    ("baseline_percent_change_unstable", "True when the baseline magnitude is below the near-zero floor, so percent change is left blank to avoid blow-up.", "Baseline"),
     ("metadata_complete", "Whether key subject metadata fields are sufficiently complete.", "Metadata"),
     ("metadata_warning", "Metadata completeness warning for the subject row.", "Metadata"),
     ("metadata_quality_score", "Fraction of key subject metadata fields filled.", "Metadata"),

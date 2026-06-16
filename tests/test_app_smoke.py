@@ -157,6 +157,44 @@ def test_analysis_value_options_prefer_valid_baseline_columns():
     assert notice is None
 
 
+def test_build_insight_artifacts_produces_grounded_bundle():
+    import json
+
+    from app import streamlit_app
+
+    analysis_tables = {
+        "stats_summary.csv": pd.DataFrame(
+            {
+                "metric_name": ["activity"],
+                "comparison": ["KO vs WT"],
+                "n_groups": [2],
+                "effect_size": [0.6],
+                "p_value": [0.03],
+            }
+        ),
+        "auc_summary.csv": pd.DataFrame({"subject_id": ["A1"], "auc": [12.0]}),
+    }
+    analysis_config = {
+        "timezone": "Europe/Paris",
+        "light_dark_cycle": {"light_on": "07:00", "light_off": "19:00"},
+        "app_version": "test",
+    }
+
+    artifacts = streamlit_app._build_insight_artifacts(
+        analysis_tables, analysis_config, manifest={"app_version": "test"}, quality_report=None
+    )
+
+    assert "insights/narrative.md" in artifacts
+    assert "insights/payload.json" in artifacts
+    # payload is valid JSON and the narrative is non-empty
+    json.loads(artifacts["insights/payload.json"])
+    assert len(artifacts["insights/narrative.md"]) > 0
+    assert "Methods" in artifacts["insights/narrative.md"]
+
+    # Empty tables → empty bundle (nothing to say, nothing leaks).
+    assert streamlit_app._build_insight_artifacts({}, analysis_config, {}, None) == {}
+
+
 def test_circadian_profile_works_with_raw_processed_values():
     from app import streamlit_app
 
