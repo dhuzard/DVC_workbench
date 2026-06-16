@@ -111,6 +111,10 @@ def _init_state() -> None:
         "analysis_tables": {},
         "analysis_figures": {},
         "analysis_warning": "",
+        "insights_payload": None,
+        "insights_narrative": None,
+        "insights_methods": None,
+        "qa_result": None,
         "quality_report": None,
         "raw_event_file_mapping": {},
         "raw_preview_plot_requested": False,
@@ -2780,6 +2784,70 @@ def analysis_config_for_insights() -> dict:
     }
 
 
+_INSIGHT_OFFLINE = "Offline — nothing leaves this computer (default)"
+_INSIGHT_OLLAMA = "Local model via Ollama (stays on your machine)"
+_INSIGHT_ANTHROPIC = "Anthropic Claude (bring your own API key)"
+
+
+def _insights_provider_controls(key_prefix: str) -> tuple[str, dict]:
+    """Render the insight-engine selector and return (choice, provider_kwargs)."""
+    choice = st.radio(
+        "Insight engine",
+        [_INSIGHT_OFFLINE, _INSIGHT_OLLAMA, _INSIGHT_ANTHROPIC],
+        key=f"{key_prefix}_provider",
+        help=(
+            "Offline uses a deterministic template — no network, no key. The model "
+            "options only ever receive the small aggregated summary tables, never your "
+            "raw time series."
+        ),
+    )
+    kwargs: dict = {}
+    if choice == _INSIGHT_OLLAMA:
+        col_a, col_b = st.columns(2)
+        kwargs["model"] = col_a.text_input(
+            "Ollama model", value="llama3.1", key=f"{key_prefix}_ollama_model"
+        )
+        kwargs["host"] = col_b.text_input(
+            "Ollama host", value="http://localhost:11434", key=f"{key_prefix}_ollama_host"
+        )
+    elif choice == _INSIGHT_ANTHROPIC:
+        col_a, col_b = st.columns(2)
+        kwargs["model"] = col_a.text_input(
+            "Claude model id",
+            value="",
+            placeholder="paste the latest Claude model id",
+            key=f"{key_prefix}_claude_model",
+        )
+        kwargs["api_key"] = col_b.text_input(
+            "API key",
+            value="",
+            type="password",
+            key=f"{key_prefix}_claude_key",
+            help="Left blank, the ANTHROPIC_API_KEY environment variable is used. Sent only to Anthropic.",
+        )
+    return choice, kwargs
+
+
+def _insights_egress_note(choice: str) -> str:
+    if choice == _INSIGHT_OLLAMA:
+        return "On generate, the summary tables are sent to your local Ollama server only."
+    if choice == _INSIGHT_ANTHROPIC:
+        return "On generate, the summary tables (never raw data) are sent to Anthropic's API."
+    return "Runs fully offline — nothing leaves this computer."
+
+
+def _make_narrative_provider(choice: str, kwargs: dict):
+    """Build the chosen narrative provider, or None for the offline default."""
+    if choice == _INSIGHT_OLLAMA:
+        return insights.OllamaProvider(model=kwargs.get("model") or "llama3.1", host=kwargs.get("host"))
+    if choice == _INSIGHT_ANTHROPIC:
+        model = (kwargs.get("model") or "").strip()
+        if not model:
+            raise ValueError("Enter a Claude model id to use the Anthropic engine.")
+        return insights.AnthropicProvider(model=model, api_key=(kwargs.get("api_key") or None))
+    return None
+
+
 def _render_insights_panel(config_summary: dict) -> None:
     """Grounded, offline-first narrative over the computed analysis tables.
 
@@ -2805,11 +2873,39 @@ def _render_insights_panel(config_summary: dict) -> None:
         analysis_config=config_summary,
         quality_report=quality_report,
     )
-    result = insights.generate_narrative(payload)
-    st.markdown(result.text)
-
     st.session_state.insights_payload = payload
-    st.session_state.insights_narrative = result
+
+    choice, provider_kwargs = _insights_provider_controls("narrative")
+    st.caption(_insights_egress_note(choice))
+
+    if choice == _INSIGHT_OFFLINE:
+        result = insights.generate_narrative(payload)
+        st.markdown(result.text)
+        st.session_state.insights_narrative = result
+    else:
+        if st.button(f"Generate narrative with {choice.split(' —')[0].split(' (')[0]}", type="primary"):
+            with _working_status(
+                "Generating model narrative",
+                "Sending the aggregated summary tables (not raw data) to the selected model.",
+            ):
+                try:
+                    provider = _make_narrative_provider(choice, provider_kwargs)
+                    result = insights.generate_narrative(payload, provider)
+                    st.session_state.insights_narrative = result
+                except (RuntimeError, ValueError) as exc:
+                    st.session_state.insights_narrative = None
+                    st.error(str(exc))
+        saved = st.session_state.get("insights_narrative")
+        if saved is not None and saved.provider != "null":
+            st.markdown(saved.text)
+            usage = []
+            if saved.prompt_tokens is not None:
+                usage.append(f"{saved.prompt_tokens} in / {saved.completion_tokens} out tokens")
+            usage.append(f"model `{saved.model_id}`")
+            usage.append(f"payload `{saved.payload_sha256[:12]}…`")
+            st.caption("Provenance: " + " · ".join(usage))
+        else:
+            st.caption("Configure the engine above and click generate. The offline summary is still exported.")
 
     methods = insights.draft_methods_section(config_summary)
     with st.expander("Draft methods paragraph", expanded=False):
@@ -2820,6 +2916,66 @@ def _render_insights_panel(config_summary: dict) -> None:
         triage_text, _issues = insights.triage_quality(quality_report)
         with st.expander("Data-quality triage", expanded=False):
             st.markdown(triage_text)
+
+    _render_qa_panel(config_summary)
+
+
+def _render_qa_panel(config_summary: dict) -> None:
+    """Grounded, tool-calling Q&A over the processed data.
+
+    The assistant answers numeric questions by CALLING the real ``analysis``
+    functions on the processed table and interpreting the returned results — it
+    never fabricates numbers. Only the small computed result tables (not the raw
+    series) are returned to the model. Requires a tool-capable cloud model.
+    """
+    if not hasattr(insights, "answer_question"):
+        return
+
+    st.markdown("#### Ask a question about your data")
+    st.caption(
+        "A tool-calling assistant answers by running the real analysis functions on your "
+        "processed data and interpreting the results — it never invents numbers. Requires a "
+        "tool-capable cloud model (Anthropic Claude)."
+    )
+
+    proc = st.session_state.get("processed_df")
+    if proc is None or getattr(proc, "empty", True):
+        st.caption("Run the pipeline first so there is processed data to query.")
+        return
+
+    choice, kwargs = _insights_provider_controls("qa")
+    if choice != _INSIGHT_ANTHROPIC:
+        st.info("Q&A needs a tool-capable model. Select 'Anthropic Claude' above to enable it.")
+        return
+
+    question = st.text_input(
+        "Your question",
+        key="qa_question",
+        placeholder="e.g. Which group had higher dark-phase activity, and by how much?",
+    )
+    if st.button("Ask", key="qa_ask") and question.strip():
+        with _working_status(
+            "Answering with tool calls",
+            "The assistant is calling analysis functions on your data and interpreting the results.",
+        ):
+            try:
+                model = (kwargs.get("model") or "").strip()
+                if not model:
+                    raise ValueError("Enter a Claude model id to ask a question.")
+                provider = insights.AnthropicToolProvider(model=model, api_key=(kwargs.get("api_key") or None))
+                st.session_state.qa_result = insights.answer_question(question.strip(), proc, provider)
+            except (RuntimeError, ValueError) as exc:
+                st.session_state.qa_result = None
+                st.error(str(exc))
+
+    qa = st.session_state.get("qa_result")
+    if qa is not None:
+        st.markdown(qa.answer)
+        if qa.tool_calls:
+            with st.expander(f"Tools the assistant ran ({len(qa.tool_calls)})", expanded=False):
+                for call in qa.tool_calls:
+                    st.markdown(f"- `{call.get('name')}` with `{call.get('arguments', {})}`")
+        st.caption(f"Provenance: model `{qa.model_id}`, {qa.steps} reasoning step(s).")
 
 
 # ---------------------------------------------------------------------------

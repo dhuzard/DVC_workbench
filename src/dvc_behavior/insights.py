@@ -28,6 +28,7 @@ default path or for the tests.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -1070,18 +1071,535 @@ added to ``analysis.py`` in later phases.
 """
 
 
+# --------------------------------------------------------------------------- #
+# 11. Grounded tool-calling (agentic) Q&A loop
+# --------------------------------------------------------------------------- #
+# Design principle: the model NEVER invents numbers.  When a question needs a
+# statistic, the model REQUESTS a computation (a tool call); the executor runs
+# the REAL ``analysis.py`` function on the data and returns the table, and the
+# model interprets it.  The loop is fully testable OFFLINE via a scripted
+# provider; the ``anthropic`` SDK stays an optional lazy import.
+
+# Curated, optional input properties exposed per analysis tool, drawn from the
+# real function signatures.  The ``df`` argument is NEVER exposed -- it is
+# injected by the executor.  Every property maps to a valid keyword parameter.
+_TOOL_INPUT_PROPERTIES: dict[str, dict[str, Any]] = {
+    "summarize_circadian_cosinor": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "period_hours": {"type": "number", "description": "Cosinor period in hours (default 24)."},
+    },
+    "summarize_light_dark": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+    },
+    "summarize_time_bins": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "bin_size": {
+            "type": "string",
+            "description": "Bin width, e.g. '1D', '1W', or hours when relative_to='alignment'.",
+        },
+        "relative_to": {
+            "type": "string",
+            "description": "'alignment' (relative hours) or 'absolute' (calendar time).",
+        },
+    },
+    "compute_auc_per_animal": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "start": {"type": "number", "description": "Window start in x-axis units (optional)."},
+        "end": {"type": "number", "description": "Window end in x-axis units (optional)."},
+    },
+    "quick_exploratory_stats": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "group_col": {"type": "string", "description": "Grouping column (default 'group_id')."},
+    },
+    "summarize_nonparametric_circadian": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+    },
+    "summarize_activity_bouts": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "threshold": {
+            "type": "number",
+            "description": "Active/inactive threshold; omit for per-subject median ('auto').",
+        },
+    },
+    "compare_window_summaries": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "windows": {
+            "type": "array",
+            "description": (
+                "Windows to contrast; each is [label, start, end] in x-axis units."
+            ),
+            "items": {"type": "array"},
+        },
+    },
+    "estimate_period": {
+        "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
+        "min_period_h": {"type": "number", "description": "Lower period bound in hours (default 18)."},
+        "max_period_h": {"type": "number", "description": "Upper period bound in hours (default 30)."},
+    },
+}
+
+
+def build_tool_specs(registry: dict[str, str] | None = None) -> list[dict]:
+    """Convert the analysis-tool registry into Anthropic-style tool schemas.
+
+    Each spec is ``{"name", "description", "input_schema"}`` where the
+    ``input_schema`` is a JSON-schema object exposing a small, curated set of
+    OPTIONAL keyword properties drawn from the real ``analysis.py`` signatures.
+    The ``df`` argument is never exposed (the executor injects it), and
+    ``required`` is always empty so the model may call a tool with no arguments.
+    """
+    registry = registry or ANALYSIS_TOOL_REGISTRY
+    specs: list[dict] = []
+    for name, description in registry.items():
+        properties = _TOOL_INPUT_PROPERTIES.get(name, {})
+        specs.append(
+            {
+                "name": name,
+                "description": description,
+                "input_schema": {
+                    "type": "object",
+                    "properties": {k: dict(v) for k, v in properties.items()},
+                    "required": [],
+                },
+            }
+        )
+    return specs
+
+
+def execute_analysis_tool(
+    name: str,
+    arguments: dict,
+    df: pd.DataFrame,
+    *,
+    max_rows: int = 30,
+) -> dict:
+    """Run a REAL ``analysis.py`` function and return a compact, JSON-able result.
+
+    The function named ``name`` is resolved from the (lazily-imported)
+    ``dvc_behavior.analysis`` module, ``arguments`` are filtered down to its
+    valid keyword parameters via :func:`inspect.signature` (``df`` and any
+    unknown keys are dropped), and it is called as ``func(df, **filtered)``.
+
+    Never raises: unknown tool names and any execution error are reported as an
+    ``{"error": ...}`` dict.  On success returns ``{"tool", "arguments",
+    "columns", "n_rows", "records", "warnings"}`` -- ``records`` is truncated to
+    ``max_rows`` rows and float-rounded so :func:`json.dumps` always succeeds.
+    """
+    try:
+        import dvc_behavior.analysis as analysis  # type: ignore  # noqa: PLC0415
+    except Exception as exc:  # noqa: BLE001 - analysis is a sibling but stay defensive
+        return {"error": f"could not import analysis module: {exc}", "tool": name}
+
+    func = getattr(analysis, name, None)
+    if func is None or not callable(func):
+        return {"error": f"unknown tool '{name}'", "tool": name}
+
+    arguments = arguments or {}
+    try:
+        params = inspect.signature(func).parameters
+        filtered = {
+            k: v
+            for k, v in arguments.items()
+            if k in params and k != "df"
+        }
+    except (TypeError, ValueError):
+        filtered = {}
+
+    try:
+        result = func(df, **filtered)
+    except Exception as exc:  # noqa: BLE001 - never raise out of the executor
+        return {"error": str(exc), "tool": name}
+
+    # analysis functions return (DataFrame, warnings); be tolerant of a bare frame.
+    warnings: list[str] = []
+    if isinstance(result, tuple):
+        table = result[0] if result else None
+        if len(result) > 1 and isinstance(result[1], (list, tuple)):
+            warnings = [str(w) for w in result[1]]
+    else:
+        table = result
+
+    if not isinstance(table, pd.DataFrame):
+        return {
+            "tool": name,
+            "arguments": _to_jsonable(filtered),
+            "columns": [],
+            "n_rows": 0,
+            "records": [],
+            "warnings": warnings,
+        }
+
+    columns = [str(c) for c in table.columns]
+    n_rows = int(len(table))
+    records = _safe_records(table.head(max_rows))
+    return {
+        "tool": name,
+        "arguments": _to_jsonable(filtered),
+        "columns": columns,
+        "n_rows": n_rows,
+        "records": records,
+        "warnings": warnings,
+    }
+
+
+@dataclass
+class AssistantTurn:
+    """One assistant turn from a tool-calling provider.
+
+    ``tool_calls`` is a list of ``{"id", "name", "input"}`` dicts.
+    ``raw_content`` is the provider's native assistant content blocks (as a list
+    of dicts) suitable to append back into ``messages`` as
+    ``{"role": "assistant", "content": raw_content}``; ``None`` when the provider
+    does not supply them (the loop then synthesizes a minimal text block).
+    """
+
+    text: str = ""
+    tool_calls: list[dict] = field(default_factory=list)
+    stop_reason: str | None = None
+    raw_content: list | None = None
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
+@runtime_checkable
+class ToolCallingProvider(Protocol):
+    """Protocol every tool-calling Q&A provider must satisfy.
+
+    ``run`` receives the system prompt, the running ``messages`` list and the
+    tool specs, and returns an :class:`AssistantTurn`.
+    """
+
+    name: str
+    model_id: str
+
+    def run(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        tools: list[dict],
+    ) -> AssistantTurn:
+        ...
+
+
+class AnthropicToolProvider:
+    """BYO-key Anthropic (Claude) provider for the tool-calling Q&A loop.
+
+    Lazy-imports the ``anthropic`` SDK and reads the key from ``api_key`` or the
+    ``ANTHROPIC_API_KEY`` environment variable (the key check fires FIRST, so a
+    missing key raises a clear :class:`RuntimeError` even when the SDK is not
+    installed).  ``model`` is REQUIRED: pass the latest Claude model id from the
+    caller rather than hardcoding a value that will rot.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str | None = None,
+        *,
+        max_tokens: int = 1024,
+    ) -> None:
+        if not model:
+            raise ValueError("AnthropicToolProvider requires an explicit 'model' id.")
+        self.model = model
+        self.name = "anthropic"
+        self.model_id = model
+        self.max_tokens = max_tokens
+        self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+
+    def run(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        tools: list[dict],
+    ) -> AssistantTurn:
+        if not self._api_key:
+            raise RuntimeError(
+                "AnthropicToolProvider requires an API key. Pass api_key=... or set "
+                "the ANTHROPIC_API_KEY environment variable. No data is sent "
+                "until a key is configured; the offline ScriptedToolProvider needs "
+                "no key."
+            )
+        try:
+            import anthropic  # type: ignore  # noqa: PLC0415
+        except ImportError as exc:  # pragma: no cover - depends on env
+            raise RuntimeError(
+                "AnthropicToolProvider requires the optional 'anthropic' SDK. "
+                "Install it with `pip install anthropic`, or use the offline "
+                "ScriptedToolProvider."
+            ) from exc
+
+        client = anthropic.Anthropic(api_key=self._api_key)
+        create_kwargs: dict[str, Any] = {
+            "model": self.model,
+            "max_tokens": self.max_tokens,
+            "system": system_prompt,
+            "messages": messages,
+            "tools": tools,
+        }
+        # Low temperature keeps interpretation deterministic; newer Claude models
+        # reject the `temperature` parameter, so fall back to a temperature-free
+        # request if the first call is rejected for that reason.
+        try:
+            try:
+                message = client.messages.create(temperature=0.0, **create_kwargs)
+            except Exception as exc:  # noqa: BLE001 - retry without temperature
+                if "temperature" not in str(exc).lower():
+                    raise
+                message = client.messages.create(**create_kwargs)
+        except Exception as exc:  # noqa: BLE001 - normalize to a guidance error
+            raise RuntimeError(
+                f"Anthropic request failed for model '{self.model}': {exc}"
+            ) from exc
+
+        text_parts: list[str] = []
+        tool_calls: list[dict] = []
+        raw_content: list[dict] = []
+        for block in getattr(message, "content", []) or []:
+            btype = getattr(block, "type", None)
+            if btype == "text":
+                text = getattr(block, "text", "")
+                text_parts.append(text)
+                raw_content.append({"type": "text", "text": text})
+            elif btype == "tool_use":
+                call = {
+                    "id": getattr(block, "id", None),
+                    "name": getattr(block, "name", None),
+                    "input": getattr(block, "input", {}) or {},
+                }
+                tool_calls.append(call)
+                raw_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": call["id"],
+                        "name": call["name"],
+                        "input": call["input"],
+                    }
+                )
+
+        usage = getattr(message, "usage", None)
+        return AssistantTurn(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            stop_reason=getattr(message, "stop_reason", None),
+            raw_content=raw_content,
+            prompt_tokens=getattr(usage, "input_tokens", None) if usage else None,
+            completion_tokens=getattr(usage, "output_tokens", None) if usage else None,
+        )
+
+
+class ScriptedToolProvider:
+    """Fully offline provider for tests: returns pre-scripted assistant turns.
+
+    Constructed with an ordered list of :class:`AssistantTurn`; each ``run``
+    call pops and returns the next.  When a turn's ``raw_content`` is ``None`` a
+    minimal assistant content list is synthesized so the loop's message append
+    still works.  Raises :class:`RuntimeError` if called more times than turns
+    were supplied.
+    """
+
+    name = "scripted"
+    model_id = "scripted"
+
+    def __init__(self, turns: list[AssistantTurn]) -> None:
+        self._turns = list(turns)
+        self._index = 0
+
+    def run(
+        self,
+        system_prompt: str,
+        messages: list[dict],
+        tools: list[dict],
+    ) -> AssistantTurn:
+        if self._index >= len(self._turns):
+            raise RuntimeError(
+                "ScriptedToolProvider exhausted: no more scripted turns "
+                f"(was called {self._index + 1} times for {len(self._turns)} turns)."
+            )
+        turn = self._turns[self._index]
+        self._index += 1
+        if turn.raw_content is None:
+            content: list[dict] = []
+            if turn.text:
+                content.append({"type": "text", "text": turn.text})
+            for call in turn.tool_calls:
+                content.append(
+                    {
+                        "type": "tool_use",
+                        "id": call.get("id"),
+                        "name": call.get("name"),
+                        "input": call.get("input", {}),
+                    }
+                )
+            if not content:
+                content.append({"type": "text", "text": ""})
+            turn.raw_content = content
+        return turn
+
+
+def build_qa_system_prompt() -> str:
+    """System prompt for the grounded tool-calling Q&A agent."""
+    return (
+        "You are a cautious behavioral-neuroscience analyst answering questions "
+        "about a Digital Ventilated Cage (DVC) rodent home-cage experiment.\n"
+        "You do NOT have the numbers yourself. Whenever a question requires a "
+        "statistic, count, ratio, period, effect size or any other number, you "
+        "MUST obtain it by calling one of the provided analysis tools, which run "
+        "the real analysis functions on the data and return a results table. "
+        "NEVER guess, estimate, recall, or invent a number -- request a "
+        "computation and interpret the returned table.\n"
+        "Rules:\n"
+        "1. Only state numbers that appear in a tool result you received this "
+        "conversation. If you have not run a tool yet, call one before answering "
+        "a numeric question.\n"
+        "2. Always state the sample size (n) alongside any group comparison or "
+        "summary.\n"
+        "3. Keep all framing EXPLORATORY. Never call a result 'significant', "
+        "'confirmed' or 'proven'; prefer 'suggests', 'consistent with', "
+        "'warrants follow-up'.\n"
+        "4. If a tool returns an error or a missing/NaN value, say so rather than "
+        "guessing.\n"
+        "5. Be concise and accessible to a non-statistician.\n"
+        "End your final answer with the following disclaimer verbatim:\n"
+        f"{INSIGHT_DISCLAIMER}"
+    )
+
+
+@dataclass
+class QAResult:
+    """A grounded answer plus full traceability for one tool-calling Q&A run."""
+
+    question: str
+    answer: str
+    tool_calls: list[dict] = field(default_factory=list)
+    provider: str = "unknown"
+    model_id: str = "unknown"
+    steps: int = 0
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    generated_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    disclaimer: str = INSIGHT_DISCLAIMER
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def answer_question(
+    question: str,
+    df: pd.DataFrame,
+    provider: ToolCallingProvider,
+    *,
+    tools: list[dict] | None = None,
+    max_steps: int = 5,
+    max_rows: int = 30,
+) -> QAResult:
+    """Answer a question by letting ``provider`` request real analysis computations.
+
+    The agent loop runs up to ``max_steps`` provider calls.  Each turn is
+    appended to ``messages``; any tool calls are executed against ``df`` via
+    :func:`execute_analysis_tool` (the model never computes numbers itself) and
+    the results are fed back as ``tool_result`` blocks.  The loop ends when a
+    turn has no tool calls (its text is the answer) or ``max_steps`` is reached.
+    The :data:`INSIGHT_DISCLAIMER` is guaranteed present in the returned answer.
+    """
+    tools = tools if tools is not None else build_tool_specs()
+    system = build_qa_system_prompt()
+    messages: list[dict] = [{"role": "user", "content": question}]
+
+    recorded_calls: list[dict] = []
+    last_text = ""
+    steps = 0
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+    for _ in range(max_steps):
+        turn = provider.run(system, messages, tools)
+        steps += 1
+
+        if turn.prompt_tokens is not None:
+            prompt_tokens = (prompt_tokens or 0) + turn.prompt_tokens
+        if turn.completion_tokens is not None:
+            completion_tokens = (completion_tokens or 0) + turn.completion_tokens
+        if turn.text:
+            last_text = turn.text
+
+        # Append the assistant turn (native content if available, else text).
+        if turn.raw_content is not None:
+            assistant_content: Any = turn.raw_content
+        else:
+            assistant_content = [{"type": "text", "text": turn.text or ""}]
+        messages.append({"role": "assistant", "content": assistant_content})
+
+        if not turn.tool_calls:
+            # No tool calls -> this turn's text is the final answer.
+            break
+
+        tool_result_blocks: list[dict] = []
+        for call in turn.tool_calls:
+            result = execute_analysis_tool(
+                call.get("name"),
+                call.get("input", {}) or {},
+                df,
+                max_rows=max_rows,
+            )
+            recorded_calls.append(
+                {
+                    "name": call.get("name"),
+                    "arguments": call.get("input", {}) or {},
+                    "result": result,
+                }
+            )
+            tool_result_blocks.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": call.get("id"),
+                    "content": json.dumps(result),
+                }
+            )
+        messages.append({"role": "user", "content": tool_result_blocks})
+    else:
+        # Loop exhausted max_steps without a tool-call-free turn.
+        if not last_text:
+            last_text = f"Stopped after {max_steps} steps without a final answer."
+
+    answer = last_text or ""
+    if INSIGHT_DISCLAIMER not in answer:
+        answer = (answer.rstrip() + "\n\n" + INSIGHT_DISCLAIMER).strip()
+
+    return QAResult(
+        question=question,
+        answer=answer,
+        tool_calls=recorded_calls,
+        provider=getattr(provider, "name", provider.__class__.__name__),
+        model_id=getattr(provider, "model_id", "unknown"),
+        steps=steps,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
+
+
 __all__ = [
     "ANALYSIS_TOOL_REGISTRY",
     "AnthropicProvider",
+    "AnthropicToolProvider",
+    "AssistantTurn",
     "INSIGHT_DISCLAIMER",
     "InsightResult",
     "KNOWN_TABLE_NAMES",
     "LLMProvider",
     "NullProvider",
     "OllamaProvider",
+    "QAResult",
+    "ScriptedToolProvider",
+    "ToolCallingProvider",
+    "answer_question",
     "build_insight_payload",
+    "build_qa_system_prompt",
     "build_system_prompt",
+    "build_tool_specs",
     "draft_methods_section",
+    "execute_analysis_tool",
     "generate_narrative",
     "payload_hash",
     "render_offline_narrative",

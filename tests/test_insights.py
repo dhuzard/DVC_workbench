@@ -363,7 +363,7 @@ def test_anthropic_requires_model():
 
 def test_anthropic_missing_key_raises(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    provider = AnthropicProvider(model="claude-opus-4-8", api_key=None)
+    provider = AnthropicProvider(model="test-model-id", api_key=None)
     payload = build_insight_payload({})
     with pytest.raises(RuntimeError) as exc:
         provider.complete(build_system_prompt(), payload)
