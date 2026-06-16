@@ -25,6 +25,12 @@ dev = [
     "pytest>=7.4",
     "ruff>=0.3",
 ]
+# Optional AI circadian scoring (Circadiem): HTTP egress + static PNG rendering.
+# Imported lazily; the default workbench path never requires these.
+ai = [
+    "requests>=2.31",
+    "kaleido>=0.2",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

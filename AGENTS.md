@@ -33,6 +33,7 @@ src/dvc_behavior/
   quality.py provenance.py schemas.py config.py
   analysis.py             # exploratory analytics (table-in/table-out)
   insights.py             # grounded, offline-first LLM narrative + tool-calling Q&A
+  circadiem.py            # optional Circadiem AI circadian-scoring HTTP client (opt-in)
   literature.py           # optional Europe PMC literature grounding (opt-in)
 tests/                    # pytest suite (mirrors module names)
 data/examples/            # bundled example CSVs
