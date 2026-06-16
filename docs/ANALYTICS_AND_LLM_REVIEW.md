@@ -156,13 +156,19 @@ mean) → a single test per contrast, which both removes the autocorrelation
 problem and makes the multiplicity explicit. Document the FDR family in the
 output and the UI.
 
-### 3.7 [M] Confidence/coverage is not propagated into the summaries
+### 3.7 [M] Confidence/coverage is not propagated into the summaries — ✅ resolved
 
 A group-bin mean computed from 1 surviving subject is rendered identically to one
 from 8 (SEM widens, but nothing flags it). `n_subjects` is reported but there is
 no gating, no "low confidence" annotation, and SEM hides n by construction.
 Recommend: minimum-n annotations, optional CI bands instead of SEM, and a
 "cells below n_min" flag in the analysis tables.
+
+**Done:** the circadian and group-mean plots now default to a Student's t **95% CI**
+band computed over per-subject means (`qc.confidence_halfwidth`), selectable as
+95% CI / SEM / none, with hover showing n and hollow/open markers on bins with
+fewer than three subjects. The group-mean plot now aggregates to subject level
+before summarizing (previously it took SEM over raw bins).
 
 ### 3.8 [M] Near-zero baselines make `baseline_percent_change` explode
 
@@ -327,8 +333,9 @@ baseline — never a hard dependency.
 - [x] Window-summary-per-subject contrasts (`compare_window_summaries`) to
   replace per-bin multiplicity (§3.6).
 - [x] `insights/payload.json` structured summary (subsumes the JSON in §3.10).
-- [ ] Coverage/confidence annotations and CI *bands* on the plots (§3.7) — the
-  numbers (`n_subjects`, CIs) are computed; richer plot overlays remain.
+- [x] Coverage/confidence annotations and CI *bands* on the plots (§3.7) —
+  subject-level Student's t 95% CI bands (selectable CI/SEM/none) with low-n
+  markers on the circadian and group-mean plots.
 
 **Phase 3 — Grounded LLM layer** — ✅ done
 - [x] `insights.py` with `build_insight_payload` + `NullProvider` (offline narrative).
@@ -344,7 +351,8 @@ baseline — never a hard dependency.
   Wired into the Analysis page (tool-capable provider required).
 - [x] Optional literature grounding (§5.3 #6) — `literature.py` (Europe PMC,
   opt-in, generic-keyword queries only); offline-default + monkeypatchable HTTP seam.
-- [ ] CI *bands* on the analysis plots (§3.7) — the numbers exist; the overlays remain.
+
+All roadmap items from this review are now implemented.
 
 ---
 
@@ -366,6 +374,9 @@ baseline — never a hard dependency.
 - **App:** new analysis tables surfaced on the Analysis page; an insight-engine
   selector (offline / Ollama / Anthropic) with egress disclosure; a grounded
   tool-calling Q&A panel; insights bundle folded into the export ZIP.
+- **`qc.py`:** `confidence_halfwidth` (t-based CI) and subject-level group-mean
+  aggregation; the circadian and group-mean plots gained selectable CI/SEM/none
+  bands with low-n markers.
 - **`literature.py` (new):** opt-in Europe PMC literature grounding —
   `build_literature_queries` (generic keywords only), `EuropePMCProvider` /
   `NullLiteratureProvider`, `find_supporting_literature`, markdown/JSON export.

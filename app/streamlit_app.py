@@ -1035,6 +1035,9 @@ def _circadian_profile(
         lambda row: row["sd"] / (row["n"] ** 0.5) if row["n"] > 1 else 0.0,
         axis=1,
     )
+    summary["ci95"] = summary.apply(
+        lambda row: qc.confidence_halfwidth(row["sd"], row["n"]), axis=1
+    )
     summary["max_days"] = max_days
     summary["normalization"] = normalize_mode
     return summary
@@ -1045,6 +1048,8 @@ def _plot_circadian_profile(
     *,
     value_label: str,
     empty_reason: str | None = None,
+    band: str = "ci95",
+    min_n: int = 3,
 ) -> go.Figure:
     fig = go.Figure()
     dark_onset = _dark_onset_zt()
@@ -1065,11 +1070,29 @@ def _plot_circadian_profile(
         fig.update_layout(title=title, template="plotly_white")
         return fig
 
+    band = (band or "ci95").lower()
+    half_col = {"ci95": "ci95", "sem": "sem", "none": None}.get(band, "ci95")
+    band_label = {"ci95": "95% CI", "sem": "SEM", "none": "mean only"}.get(band, "95% CI")
+
     for group_label, group_df in profile.groupby("group_label", dropna=False):
         group_df = group_df.sort_values("zeitgeber_time_hours")
         x = group_df["zeitgeber_time_hours"]
         mean = group_df["mean"]
-        sem = group_df["sem"].fillna(0)
+        n = group_df["n"] if "n" in group_df.columns else pd.Series(0, index=group_df.index)
+        if half_col is not None and half_col in group_df.columns:
+            half = group_df[half_col].fillna(0)
+            fig.add_trace(
+                go.Scatter(
+                    x=pd.concat([x, x.iloc[::-1]]),
+                    y=pd.concat([mean + half, (mean - half).iloc[::-1]]),
+                    fill="toself",
+                    line=dict(color="rgba(0,0,0,0)"),
+                    hoverinfo="skip",
+                    showlegend=False,
+                    name=f"{group_label} {band_label}",
+                )
+            )
+        low_n = n < min_n
         fig.add_trace(
             go.Scatter(
                 x=x,
@@ -1077,22 +1100,20 @@ def _plot_circadian_profile(
                 mode="lines+markers",
                 name=str(group_label),
                 line=dict(width=2),
-            )
-        )
-        fig.add_trace(
-            go.Scatter(
-                x=pd.concat([x, x.iloc[::-1]]),
-                y=pd.concat([mean + sem, (mean - sem).iloc[::-1]]),
-                fill="toself",
-                line=dict(color="rgba(0,0,0,0)"),
-                hoverinfo="skip",
-                showlegend=False,
-                name=f"{group_label} SEM",
+                marker=dict(
+                    size=7,
+                    symbol=["circle-open" if v else "circle" for v in low_n],
+                ),
+                customdata=n,
+                hovertemplate=(
+                    f"ZT %{{x}}<br>%{{y:.3g}} ± {band_label}<br>n=%{{customdata}} subjects"
+                    f"<extra>{group_label}</extra>"
+                ),
             )
         )
 
     fig.update_layout(
-        title="Circadian rhythm profile",
+        title=f"Circadian rhythm profile (mean ± {band_label})",
         xaxis_title="Zeitgeber time (hours from lights on)",
         yaxis_title=value_label,
         xaxis=dict(range=[0, 24], dtick=3),
@@ -2538,6 +2559,20 @@ def _tab_analysis() -> None:
             key="analysis_circ_norm",
         )
 
+    band_choice = st.radio(
+        "Error band on group plots",
+        ["95% CI", "SEM", "None"],
+        index=0,
+        horizontal=True,
+        key="analysis_band",
+        help=(
+            "95% CI is a Student's t interval over per-subject means (recommended). SEM is "
+            "narrower and hides sample size. Bins with fewer than 3 subjects are drawn with "
+            "hollow markers."
+        ),
+    )
+    band_key = {"95% CI": "ci95", "SEM": "sem", "None": "none"}[band_choice]
+
     time_relative_to, time_timestamp_col, time_mode_label = _time_bin_settings(metric_df)
     auc_x_col, auc_start_default, auc_end_default, auc_mode_label = _auc_settings(metric_df)
 
@@ -2673,23 +2708,28 @@ def _tab_analysis() -> None:
     st.subheader("Circadian rhythm profile")
     with _working_status(
         "Drawing circadian rhythm profile",
-        "The app is plotting group mean circadian traces with SEM and shaded dark phase.",
+        "The app is plotting group mean circadian traces with a confidence band and shaded dark phase.",
     ):
         circ_fig = _plot_circadian_profile(
             circadian_profile,
             value_label=sel_value,
             empty_reason=circadian_profile_issue,
+            band=band_key,
         )
     if circadian_profile_issue:
         st.warning(circadian_profile_issue)
     st.plotly_chart(circ_fig, width="stretch")
+    st.caption(
+        f"Shaded band: {band_choice} over per-subject means. Hollow markers mark "
+        "bins with fewer than 3 subjects, where the interval is unreliable."
+    )
 
     st.subheader("Group mean plot")
     with _working_status(
         "Drawing baseline-corrected group plot",
-        "The app is plotting group mean traces with SEM for the selected value column.",
+        "The app is plotting group mean traces with a confidence band for the selected value column.",
     ):
-        fig = qc.plot_group_mean_timeseries(metric_df, sel_metric, y_col=sel_value)
+        fig = qc.plot_group_mean_timeseries(metric_df, sel_metric, y_col=sel_value, band=band_key)
     st.plotly_chart(fig, width="stretch")
     st.session_state.analysis_figures = {
         "analysis_raw_trace.png": raw_fig,

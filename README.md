@@ -115,7 +115,7 @@ ruff check .
 | Metadata & Study Design | Edit study, subject, group, treatment schedule, and group assignment metadata |
 | Events, Alignment & Exclusions | Preview events, detect cage-change pairs, configure alignment and confound windows |
 | Baseline & Aggregation | Configure baseline window, optional group-mean imputation/overrides, and run the pipeline |
-| QC Plots | Review raw/aligned plots, baseline quality heatmap, irregular-bin report, and group means |
+| QC Plots | Review raw/aligned plots, baseline quality heatmap, irregular-bin report, and group means with a selectable 95% CI / SEM band |
 | Export | Download a ZIP with processed data, config, metadata, reports, and optional analysis outputs |
 | Analysis | Generate exploratory circadian (cosinor + rhythmicity test, IS/IV/RA, period), binned, AUC, bout/fragmentation, estimation-first statistics, and plain-language insight summaries |
 
@@ -229,6 +229,7 @@ dvc-behavioral-preprocessing-workbench/
 - **Exploratory statistics only.** P-values and group comparisons in the app are orientation tools, not confirmatory inference. Statistics are estimation-first: read the effect/difference with its confidence interval and the sample sizes before any p-value, and heed the `small_n_warning` flag (when groups are too small for the test to ever reach significance).
 - **Light/dark annotation uses local time.** The user selects a timezone (default: `Europe/Paris`). ZT0 = lights-on time. The cosinor phase split honours the configured photoperiod (not a fixed 12:12).
 - **Near-zero baselines are guarded.** Percent-change is not computed when the baseline magnitude is below a small floor; affected rows are flagged via `baseline_percent_change_unstable` so low-activity (e.g. light-phase) baselines cannot inflate group means.
+- **Group-plot error bands are subject-level.** The circadian and group-mean plots default to a Student's t **95% CI** computed over per-subject means (selectable: 95% CI / SEM / none), so the band reflects between-animal variability rather than raw-bin count. Time bins with fewer than three subjects are drawn with hollow/open markers because the interval is unreliable there.
 - **Imputed baselines are flagged.** Group-mean baseline imputation is optional and sets `baseline_imputed=True`.
 - **AI insights are grounded and local-first.** The optional plain-language narrative interprets only the small aggregated summary tables — never your raw time series — and runs fully offline by default (no network, no API key). A local model (Ollama) or a bring-your-own-key cloud model (Anthropic Claude) can be used as an opt-in enhancement; when chosen, only the summary tables are sent. Every narrative records the model and a hash of its input payload for traceability, and always carries the exploratory disclaimer.
 

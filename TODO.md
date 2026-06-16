@@ -523,7 +523,10 @@ tests/
   Europe PMC, opt-in, generic-keyword queries only, offline-default) wired into the
   insights panel and export bundle; added a concrete recommended starting model to
   the README.
-- Remaining open items: CI bands on the analysis plots.
+- Follow-up (2026-06-16): added subject-level Student's t 95% CI bands (selectable
+  CI/SEM/none) with low-n markers to the circadian and group-mean plots
+  (`qc.confidence_halfwidth`); the group-mean plot now aggregates to subject level
+  before summarizing. All roadmap items from the analytics/LLM review are now done.
 
 ## Session notes (2026-05-07)
 
