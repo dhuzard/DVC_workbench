@@ -20,3 +20,10 @@ outputs/*.md
 # Local secrets / config for docker compose (keep the example tracked)
 .env
 !.env.example
+
+# Oversized bundled example datasets — too large to track in git (~22 MB each).
+# Kept locally for development; smaller examples remain tracked so the
+# bundled-example feature and the e2e/container smoke tests still work.
+# (Add further large local-only examples below as needed.)
+data/examples/Group11_animal_loc__index_smoothed.csv
+data/examples/Group12_animal_loc__index_smoothed.csv

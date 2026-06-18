@@ -248,6 +248,24 @@ The **Analysis** page can turn the summary tables into readable, caveated prose 
 answer questions about your data. This layer is designed around the same
 local-first promise as the rest of the workbench.
 
+**Data egress at a glance.** Everything is **offline by default** — the table below is
+the complete list of optional features that can talk to the network, and each is
+**opt-in and off until you turn it on**. The model never sees your raw time series.
+
+| Feature | Default | What can leave your machine | Where it goes | Credential |
+|---------|---------|-----------------------------|---------------|------------|
+| Offline narrative | **On** | Nothing | — | None |
+| Ollama narrative / Q&A | Off | Aggregated summary tables only | Your **local** Ollama server | None |
+| Anthropic Claude narrative / Q&A | Off | Aggregated summary tables only | Anthropic API | Your `ANTHROPIC_API_KEY` (BYO) |
+| Europe PMC literature | Off | Generic topic **keywords** only (never data/group/file names) | Europe PMC API | None |
+| Circadiem circadian scoring | Off | A **rendered plot image** per group (no raw series) | A Circadiem service **you** deploy → OpenAI | `OPENAI_API_KEY`, forwarded per-request, never stored |
+
+> The Circadiem path is the heaviest disclosure: it transmits derived **plot images**
+> and forwards an `OPENAI_API_KEY` to a third-party service you operate, which in turn
+> calls OpenAI. Running Circadiem locally keeps the *service* local, but the OpenAI
+> vision call still egresses from it. See the [Circadiem](#ai-insights-optional) details
+> below before enabling it.
+
 **Plain-language narrative.** Pick an *Insight engine*:
 
 | Engine | What leaves your computer | Needs |
