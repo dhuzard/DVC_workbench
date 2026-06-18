@@ -7,7 +7,7 @@
 
 A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cage (DVC)** behavioral data exports, reviewing quality/confounds, and producing traceable outputs for exploratory analysis.
 
-> **Note:** DVC here means *Digital Ventilated Cage* (Tecniplast/TSE), **not** Data Version Control.
+> DVC cages are designed and manufactured by Tecniplast S.p.A.
 
 ---
 
