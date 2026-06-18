@@ -15,6 +15,12 @@ from typing import Any
 import pandas as pd
 import yaml
 
+__all__ = [
+    "build_analysis_config",
+    "create_export_zip",
+    "create_export_zip_file",
+]
+
 
 def _df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     buf = io.StringIO()
@@ -146,9 +152,7 @@ def create_export_zip(
 
         # Metadata validation report
         if metadata_validation_report:
-            zf.writestr(
-                "metadata_validation_report.md", _text_to_bytes(metadata_validation_report)
-            )
+            zf.writestr("metadata_validation_report.md", _text_to_bytes(metadata_validation_report))
 
         if manifest is not None:
             safe_manifest = _make_yaml_safe(manifest)

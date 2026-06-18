@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: DVC Behavioral Preprocessing Workbench
+message: >-
+  If you use this software in your research, please cite it using the
+  metadata in this file.
+type: software
+authors:
+  - given-names: Damien
+    family-names: Huzard
+    email: damien@metadatapp.net
+repository-code: "https://github.com/dhuzard/DVC_workbench"
+url: "https://github.com/dhuzard/DVC_workbench"
+abstract: >-
+  A local-first Python + Streamlit workbench that turns binned Digital
+  Ventilated Cage (DVC) home-cage behavioral CSV exports into clean,
+  traceable, scientifically interpretable datasets, with an exploratory
+  analysis layer (cosinor rhythmicity, non-parametric circadian metrics,
+  activity fragmentation, estimation-first statistics) and a grounded,
+  offline-first LLM insights layer. Your data stays on your computer.
+keywords:
+  - neuroscience
+  - circadian
+  - chronobiology
+  - behavior
+  - digital ventilated cage
+  - home-cage monitoring
+  - preprocessing
+license: GPL-3.0-or-later
+version: 0.1.0
+date-released: "2026-06-18"

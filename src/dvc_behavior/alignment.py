@@ -15,6 +15,11 @@ import math
 
 import pandas as pd
 
+__all__ = [
+    "align_to_event",
+    "align_to_manual_timestamp",
+]
+
 
 def _find_alignment_timestamp(
     subject_id: str,
@@ -117,8 +122,7 @@ def align_to_event(
     n_no_align = alignment_timestamps.isna().sum()
     if n_no_align:
         warns.append(
-            f"{n_no_align} rows have no alignment timestamp; "
-            "time_from_event columns will be NaN."
+            f"{n_no_align} rows have no alignment timestamp; time_from_event columns will be NaN."
         )
 
     # Compute time deltas

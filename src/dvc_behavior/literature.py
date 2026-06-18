@@ -131,7 +131,9 @@ def build_literature_queries(payload: dict | None, *, max_queries: int = 4) -> l
 class LiteratureProvider(Protocol):
     name: str
 
-    def search(self, query: str, max_results: int) -> list[Reference]:  # pragma: no cover - protocol
+    def search(
+        self, query: str, max_results: int
+    ) -> list[Reference]:  # pragma: no cover - protocol
         ...
 
 
@@ -264,9 +266,7 @@ def format_references_markdown(result: LiteratureResult) -> str:
     lines.append("**Queries used:** " + "; ".join(f"`{q}`" for q in result.queries))
     lines.append("")
     if not result.references:
-        lines.append(
-            "_No references fetched (offline mode, or the search returned nothing)._"
-        )
+        lines.append("_No references fetched (offline mode, or the search returned nothing)._")
     else:
         for ref in result.references:
             cite = ref.title or "(untitled)"

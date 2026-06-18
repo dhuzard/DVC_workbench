@@ -111,7 +111,9 @@ def summarize_circadian_cosinor(
         clean[value_col] = pd.to_numeric(clean[value_col], errors="coerce")
         clean = clean.dropna(subset=[zt_col, value_col])
         if not clean.empty and zt_bin_hours > 0:
-            clean["_zt_bin"] = (np.floor(clean[zt_col] / zt_bin_hours) * zt_bin_hours) % period_hours
+            clean["_zt_bin"] = (
+                np.floor(clean[zt_col] / zt_bin_hours) * zt_bin_hours
+            ) % period_hours
             # Legacy point estimates always use pooled per-ZT-bin means.
             fit_data = clean.groupby("_zt_bin", dropna=False)[value_col].mean().reset_index()
             fit_x_col = "_zt_bin"
@@ -224,17 +226,13 @@ def summarize_light_dark(
         summary_source = subject_means
         summary_value = "subject_mean"
         observation_counts = (
-            data.groupby([*keys, phase_col], dropna=False)
-            .size()
-            .reset_index(name="n_observations")
+            data.groupby([*keys, phase_col], dropna=False).size().reset_index(name="n_observations")
         )
     else:
         summary_source = data.rename(columns={value_col: "subject_mean"})
         summary_value = "subject_mean"
         observation_counts = (
-            data.groupby([*keys, phase_col], dropna=False)
-            .size()
-            .reset_index(name="n_observations")
+            data.groupby([*keys, phase_col], dropna=False).size().reset_index(name="n_observations")
         )
 
     summary = (
@@ -246,7 +244,9 @@ def summarize_light_dark(
     summary = summary.merge(observation_counts, on=[*keys, phase_col], how="left")
 
     ratios = _dark_light_ratios(summary, keys, phase_col)
-    summary = summary.merge(ratios, on=keys, how="left") if keys else _merge_global_ratio(summary, ratios)
+    summary = (
+        summary.merge(ratios, on=keys, how="left") if keys else _merge_global_ratio(summary, ratios)
+    )
     summary = summary.rename(columns={phase_col: "phase"})
     return _ordered_summary_columns(summary, [*keys, "phase"]), warns
 
@@ -279,7 +279,9 @@ def summarize_time_bins(
     data = data.copy()
     if relative_to == "alignment":
         if relative_time_col not in data.columns:
-            warns.append(f"Missing '{relative_time_col}'; cannot summarize alignment-relative bins.")
+            warns.append(
+                f"Missing '{relative_time_col}'; cannot summarize alignment-relative bins."
+            )
             return pd.DataFrame(), warns
         bin_hours = _bin_size_to_hours(bin_size)
         rel = pd.to_numeric(data[relative_time_col], errors="coerce")
@@ -329,7 +331,9 @@ def summarize_time_bins(
         .reset_index()
     )
     summary["sem"] = summary.apply(lambda r: _sem_from_sd(r["sd"], r["n_subjects"]), axis=1)
-    counts = data.groupby([*keys, *bin_cols], dropna=False).size().reset_index(name="n_observations")
+    counts = (
+        data.groupby([*keys, *bin_cols], dropna=False).size().reset_index(name="n_observations")
+    )
     summary = summary.merge(counts, on=[*keys, *bin_cols], how="left")
     summary["bin_size"] = str(bin_size)
     summary["relative_to"] = relative_to
@@ -491,7 +495,9 @@ def quick_exploratory_stats(
         warns.append(f"Missing '{group_col}'; cannot compare groups.")
         return pd.DataFrame(), warns
 
-    block_cols = list(block_cols) if block_cols is not None else _default_block_cols(data, group_col)
+    block_cols = (
+        list(block_cols) if block_cols is not None else _default_block_cols(data, group_col)
+    )
     block_cols = _existing_cols(data, block_cols)
     stats_mod = _load_scipy_stats()
 
@@ -582,7 +588,9 @@ def quick_exploratory_stats(
         min_possible_p = np.nan
         small_n_warning = False
         if len(group_arrays) == 2:
-            stat, p_value = stats_mod.mannwhitneyu(group_arrays[0], group_arrays[1], alternative="two-sided")
+            stat, p_value = stats_mod.mannwhitneyu(
+                group_arrays[0], group_arrays[1], alternative="two-sided"
+            )
             test_name = "Mann-Whitney U"
             effect_size = _rank_biserial_from_u(stat, len(group_arrays[0]), len(group_arrays[1]))
             effect_size_name = "rank-biserial"
@@ -593,9 +601,7 @@ def quick_exploratory_stats(
             diff_ci_high = est["diff_ci_high"]
             effect_size_ci_low = est["effect_size_ci_low"]
             effect_size_ci_high = est["effect_size_ci_high"]
-            min_possible_p = _min_possible_mannwhitney_p(
-                len(group_arrays[0]), len(group_arrays[1])
-            )
+            min_possible_p = _min_possible_mannwhitney_p(len(group_arrays[0]), len(group_arrays[1]))
             small_n_warning = bool(np.isfinite(min_possible_p) and min_possible_p > 0.05)
             if small_n_warning:
                 small_n_warnings.append(
@@ -966,9 +972,7 @@ def estimate_period(
             t0 = clean["_ts"].iloc[0]
             t = (clean["_ts"] - t0).dt.total_seconds().to_numpy(dtype=float) / 3600.0
             y = clean[value_col].to_numpy(dtype=float)
-            period, peak_power = _lombscargle_peak(
-                lombscargle, t, y, min_period_h, max_period_h
-            )
+            period, peak_power = _lombscargle_peak(lombscargle, t, y, min_period_h, max_period_h)
         rows.append(
             {
                 **key_values,
@@ -1000,15 +1004,9 @@ def _binned_activity_series(
     if clean.empty:
         return None
     freq = pd.to_timedelta(bin_hours, unit="h")
-    binned = (
-        clean.set_index(ts_col)[value_col]
-        .resample(freq, origin="epoch")
-        .mean()
-    )
+    binned = clean.set_index(ts_col)[value_col].resample(freq, origin="epoch").mean()
     # Fill internal gaps so the regular grid used by IS/IV is complete.
-    binned = binned.reindex(
-        pd.date_range(binned.index.min(), binned.index.max(), freq=freq)
-    )
+    binned = binned.reindex(pd.date_range(binned.index.min(), binned.index.max(), freq=freq))
     if binned.notna().sum() < 2:
         return None
     return binned
@@ -1031,9 +1029,7 @@ def _nonparametric_circadian_metrics(profile: pd.Series, bin_hours: float) -> di
     is_value = nan
     if bins_per_day >= 2 and overall_var and overall_var > 0:
         phase = np.arange(n) % bins_per_day
-        hourly_means = np.array(
-            [np.nanmean(values[phase == h]) for h in range(bins_per_day)]
-        )
+        hourly_means = np.array([np.nanmean(values[phase == h]) for h in range(bins_per_day)])
         if np.isfinite(hourly_means).all():
             between_var = float(np.mean((hourly_means - overall_mean) ** 2))
             is_value = float(between_var / overall_var)
@@ -1318,7 +1314,9 @@ def _fit_cosinor_scipy(
     }
 
 
-def _fit_cosinor_linear(x: np.ndarray, y: np.ndarray, period_hours: float) -> dict[str, float | str]:
+def _fit_cosinor_linear(
+    x: np.ndarray, y: np.ndarray, period_hours: float
+) -> dict[str, float | str]:
     radians = 2.0 * np.pi * x / period_hours
     design = np.column_stack([np.ones_like(radians), np.cos(radians), np.sin(radians)])
     mesor, beta_cos, beta_sin = np.linalg.lstsq(design, y, rcond=None)[0]
@@ -1493,7 +1491,9 @@ def _dark_light_ratios(summary: pd.DataFrame, keys: list[str], phase_col: str) -
     tmp = summary.copy()
     if not keys:
         tmp["_global"] = "all"
-    pivot = tmp.pivot_table(index=index_cols, columns=phase_col, values="mean", aggfunc="first").reset_index()
+    pivot = tmp.pivot_table(
+        index=index_cols, columns=phase_col, values="mean", aggfunc="first"
+    ).reset_index()
     light = pd.to_numeric(pivot.get("light"), errors="coerce")
     dark = pd.to_numeric(pivot.get("dark"), errors="coerce")
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -1553,7 +1553,12 @@ def _absolute_bin_end(starts: pd.Series, bin_size: str | float | int) -> pd.Seri
 
 
 def _default_auc_x_col(data: pd.DataFrame) -> str | None:
-    for col in ("time_from_event_hours", "timestamp_utc", "timestamp_local", "relative_time_seconds"):
+    for col in (
+        "time_from_event_hours",
+        "timestamp_utc",
+        "timestamp_local",
+        "relative_time_seconds",
+    ):
         if col in data.columns:
             return col
     return None

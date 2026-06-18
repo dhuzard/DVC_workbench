@@ -19,12 +19,25 @@ def _make_long(n_rows=48, bin_min=60, start="2024-01-01T07:00:00+0100", groups=N
     return long
 
 
-def _make_event_df_utc(ts_str: str, subject: str, group: str = "C57", etype: str = "REMOVED") -> pd.DataFrame:
-    ev = pd.DataFrame([{
-        "group": group, "day": 0, "hour": 0, "minute": 0, "relativeTime": 0,
-        "timestamp": ts_str, "cage": subject,
-        "rack": "R1", "position": "A1", "event": etype,
-    }])
+def _make_event_df_utc(
+    ts_str: str, subject: str, group: str = "C57", etype: str = "REMOVED"
+) -> pd.DataFrame:
+    ev = pd.DataFrame(
+        [
+            {
+                "group": group,
+                "day": 0,
+                "hour": 0,
+                "minute": 0,
+                "relativeTime": 0,
+                "timestamp": ts_str,
+                "cage": subject,
+                "rack": "R1",
+                "position": "A1",
+                "event": etype,
+            }
+        ]
+    )
     buf = io.StringIO()
     ev.to_csv(buf, index=False)
     parsed, _ = parse_event_csv(io.BytesIO(buf.getvalue().encode()), "ev.csv")
@@ -37,8 +50,13 @@ class TestAlignToEvent:
         event_ts = "2024-01-02T07:00:00+0100"
         event_df = _make_event_df_utc(event_ts, "C57_1", etype="REMOVED")
         out, warns = align_to_event(long, event_df, "REMOVED")
-        for col in ("alignment_event_type", "alignment_timestamp",
-                    "time_from_event_seconds", "time_from_event_hours", "experimental_day"):
+        for col in (
+            "alignment_event_type",
+            "alignment_timestamp",
+            "time_from_event_seconds",
+            "time_from_event_hours",
+            "experimental_day",
+        ):
             assert col in out.columns, f"Missing column: {col}"
 
     def test_time_from_event_at_event_is_zero(self):
@@ -68,9 +86,7 @@ class TestAlignToEvent:
     def test_no_event_uses_fallback(self):
         long = _make_long(n_rows=10)
         fallback = "2024-01-01T07:00:00+0100"
-        out, warns = align_to_event(
-            long, pd.DataFrame(), "REMOVED", fallback_timestamp=fallback
-        )
+        out, warns = align_to_event(long, pd.DataFrame(), "REMOVED", fallback_timestamp=fallback)
         # With fallback, all rows should have a non-NaN time_from_event
         assert out["time_from_event_seconds"].notna().any()
 

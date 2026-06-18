@@ -29,7 +29,8 @@ def _analysis_df() -> pd.DataFrame:
                         "metric_name": "activity",
                         "subject_id": subject_id,
                         "time_from_event_hours": float(hour),
-                        "timestamp_utc": pd.Timestamp("2024-01-01T00:00:00Z") + pd.Timedelta(hours=hour),
+                        "timestamp_utc": pd.Timestamp("2024-01-01T00:00:00Z")
+                        + pd.Timedelta(hours=hour),
                         "zeitgeber_time_hours": float(zt),
                         "light_dark_phase": "light" if zt < 12 else "dark",
                         "value": offset + subject_idx + 5.0 + 2.0 * np.cos(2.0 * np.pi * zt / 24.0),

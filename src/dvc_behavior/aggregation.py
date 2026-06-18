@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import pandas as pd
 
+__all__ = [
+    "aggregate",
+]
+
 
 _NUMERIC_COLS_TO_AGG = [
     "value",
@@ -118,7 +122,9 @@ def aggregate(
     meta_cols = [c for c in _METADATA_COLS if c in df.columns and c not in group_keys]
     if meta_cols:
         meta_agg = df.groupby(group_keys)[meta_cols].first().reset_index()
-        agg_parts.append(meta_agg.drop(columns=[k for k in group_keys if k in meta_agg.columns], errors="ignore"))
+        agg_parts.append(
+            meta_agg.drop(columns=[k for k in group_keys if k in meta_agg.columns], errors="ignore")
+        )
 
     # Exclusion summary per bin
     if "is_excluded" in df.columns:
@@ -126,9 +132,15 @@ def aggregate(
         count_agg = df.groupby(group_keys).size().reset_index(name="_n_bins")
         excl_pct = df.groupby(group_keys)["is_excluded"].mean().reset_index(name="_pct_excluded")
         agg_parts += [
-            excl_agg.drop(columns=[k for k in group_keys if k in excl_agg.columns], errors="ignore"),
-            count_agg.drop(columns=[k for k in group_keys if k in count_agg.columns], errors="ignore"),
-            excl_pct.drop(columns=[k for k in group_keys if k in excl_pct.columns], errors="ignore"),
+            excl_agg.drop(
+                columns=[k for k in group_keys if k in excl_agg.columns], errors="ignore"
+            ),
+            count_agg.drop(
+                columns=[k for k in group_keys if k in count_agg.columns], errors="ignore"
+            ),
+            excl_pct.drop(
+                columns=[k for k in group_keys if k in excl_pct.columns], errors="ignore"
+            ),
         ]
 
     if not agg_parts:

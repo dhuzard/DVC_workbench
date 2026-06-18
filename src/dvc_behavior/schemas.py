@@ -10,6 +10,13 @@ from typing import Any
 
 import pandas as pd
 
+__all__ = [
+    "validate_dataframe",
+    "validate_long_df",
+    "validate_event_df",
+    "validate_processed_df",
+]
+
 
 _LONG_REQUIRED = {
     "source_file",
@@ -30,6 +37,7 @@ _PROCESSED_REQUIRED = _LONG_REQUIRED | {
     "is_excluded",
     "exclusion_reason",
 }
+
 
 def validate_dataframe(
     df: pd.DataFrame,

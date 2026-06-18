@@ -73,7 +73,9 @@ def subject_column_config() -> dict[str, Any]:
         "cage_id": st.column_config.TextColumn(
             "Cage ID", help=SUBJECT_COLUMN_HELP["cage_id"], required=True
         ),
-        "cage_uuid": st.column_config.TextColumn("Cage UUID", help=SUBJECT_COLUMN_HELP["cage_uuid"]),
+        "cage_uuid": st.column_config.TextColumn(
+            "Cage UUID", help=SUBJECT_COLUMN_HELP["cage_uuid"]
+        ),
         "rack": st.column_config.TextColumn("Rack", help=SUBJECT_COLUMN_HELP["rack"]),
         "position": st.column_config.TextColumn("Position", help=SUBJECT_COLUMN_HELP["position"]),
         "sex": st.column_config.SelectboxColumn(
@@ -131,16 +133,16 @@ def group_column_config() -> dict[str, Any]:
         "group_label": st.column_config.TextColumn(
             "Group label", help=GROUP_COLUMN_HELP["group_label"], required=True
         ),
-        "group_color": st.column_config.TextColumn(
-            "Color", help=GROUP_COLUMN_HELP["group_color"]
-        ),
+        "group_color": st.column_config.TextColumn("Color", help=GROUP_COLUMN_HELP["group_color"]),
         "treatment": st.column_config.TextColumn("Treatment", help=GROUP_COLUMN_HELP["treatment"]),
         "genotype": st.column_config.TextColumn("Genotype", help=GROUP_COLUMN_HELP["genotype"]),
         "cohort": st.column_config.TextColumn("Cohort", help=GROUP_COLUMN_HELP["cohort"]),
         "experimental_condition": st.column_config.TextColumn(
             "Experimental condition", help=GROUP_COLUMN_HELP["experimental_condition"]
         ),
-        "n_expected": st.column_config.TextColumn("Expected N", help=GROUP_COLUMN_HELP["n_expected"]),
+        "n_expected": st.column_config.TextColumn(
+            "Expected N", help=GROUP_COLUMN_HELP["n_expected"]
+        ),
         "description": st.column_config.TextColumn(
             "Description", help=GROUP_COLUMN_HELP["description"]
         ),

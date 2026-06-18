@@ -43,8 +43,9 @@ def processed_df() -> pd.DataFrame:
                 zt = hour % 24
                 phase = "light" if 6 <= zt < 18 else "dark"
                 level = 10.0 if group == "KO" else 6.0
-                value = max(0.0, level + 4.0 * np.cos((zt - 14) / 24 * 2 * np.pi)
-                            + rng.normal(0, 0.5))
+                value = max(
+                    0.0, level + 4.0 * np.cos((zt - 14) / 24 * 2 * np.pi) + rng.normal(0, 0.5)
+                )
                 ts = base + pd.Timedelta(hours=hour)
                 rows.append(
                     {
@@ -119,9 +120,7 @@ def test_execute_quick_exploratory_stats(processed_df: pd.DataFrame) -> None:
 
 
 def test_execute_respects_max_rows(processed_df: pd.DataFrame) -> None:
-    result = execute_analysis_tool(
-        "summarize_circadian_cosinor", {}, processed_df, max_rows=1
-    )
+    result = execute_analysis_tool("summarize_circadian_cosinor", {}, processed_df, max_rows=1)
     assert len(result["records"]) <= 1
 
 
@@ -214,9 +213,7 @@ def test_answer_question_max_steps_guard(processed_df: pd.DataFrame) -> None:
     # Provider ALWAYS returns a tool call; supply enough turns to cover max_steps.
     turns = [_tool_call_turn(f"call-{i}", "summarize_light_dark") for i in range(10)]
     provider = ScriptedToolProvider(turns)
-    result = answer_question(
-        "loop forever?", processed_df, provider, max_steps=3
-    )
+    result = answer_question("loop forever?", processed_df, provider, max_steps=3)
     assert result.steps == 3
     assert INSIGHT_DISCLAIMER in result.answer
     # Each step executed one tool call.

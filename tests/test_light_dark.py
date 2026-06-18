@@ -89,10 +89,10 @@ class TestAnnotateLightDark:
 
     def test_mixed_phases(self):
         times = [
-            _local("2024-01-01 08:00:00"),   # light
-            _local("2024-01-01 20:00:00"),   # dark
-            _local("2024-01-01 12:00:00"),   # light
-            _local("2024-01-02 02:00:00"),   # dark
+            _local("2024-01-01 08:00:00"),  # light
+            _local("2024-01-01 20:00:00"),  # dark
+            _local("2024-01-01 12:00:00"),  # light
+            _local("2024-01-02 02:00:00"),  # dark
         ]
         phases, _ = self._annotate(times)
         assert phases == ["light", "dark", "light", "dark"]

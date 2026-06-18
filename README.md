@@ -1,5 +1,10 @@
 # DVC Behavioral Preprocessing Workbench
 
+[![CI](https://github.com/dhuzard/DVC_workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuzard/DVC_workbench/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![Code style: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
+
 A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cage (DVC)** behavioral data exports, reviewing quality/confounds, and producing traceable outputs for exploratory analysis.
 
 > **Note:** DVC here means *Digital Ventilated Cage* (Tecniplast/TSE), **not** Data Version Control.
@@ -376,3 +381,22 @@ The v0.2 roadmap in `TODO.md` focuses on:
 - Expanding reusable data-quality diagnostics as new real-world failure modes appear
 - Keeping exploratory statistics clearly labelled with effect sizes and FDR correction
 - Strengthening smoke coverage around the app workflow
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`AGENTS.md`](AGENTS.md) (the codebase conventions) before opening a pull request,
+and note our [Code of Conduct](CODE_OF_CONDUCT.md). Found a security or privacy
+issue? Please follow [`SECURITY.md`](SECURITY.md) rather than filing a public issue.
+
+## Citation
+
+If you use this workbench in your research, please cite it — see
+[`CITATION.cff`](CITATION.cff) or use GitHub's **"Cite this repository"** button.
+
+## License
+
+Released under the **GNU General Public License v3.0 or later** — see
+[`LICENSE`](LICENSE).

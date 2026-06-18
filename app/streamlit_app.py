@@ -57,6 +57,7 @@ from dvc_behavior import (  # noqa: E402
     reporting,
     schemas,
 )
+
 _NO_EVENT_FILE = "No event file"
 
 
@@ -73,9 +74,11 @@ def _working_status(title: str, detail: str):
     else:
         status.update(label=f"{title} complete", state="complete", expanded=False)
 
+
 # ---------------------------------------------------------------------------
 # Session state initialisation
 # ---------------------------------------------------------------------------
+
 
 def _init_state() -> None:
     defaults: dict[str, Any] = {
@@ -95,7 +98,9 @@ def _init_state() -> None:
         "facility_events": pd.DataFrame(
             columns=["timestamp_start", "timestamp_end", "event_type", "affected_groups", "notes"]
         ),
-        "baseline_overrides": pd.DataFrame(columns=["subject_id", "metric_name", "baseline_value", "notes"]),
+        "baseline_overrides": pd.DataFrame(
+            columns=["subject_id", "metric_name", "baseline_value", "notes"]
+        ),
         # processing config
         "timezone": cfg.DEFAULT_TIMEZONE,
         "light_on": cfg.DEFAULT_LIGHT_ON,
@@ -137,6 +142,7 @@ def _init_state() -> None:
 # Helper: parse all uploaded metric & event files
 # ---------------------------------------------------------------------------
 
+
 @st.cache_data(show_spinner=False)
 def _cached_load_metric_csv(name: str, data: bytes) -> tuple[pd.DataFrame, list[str]]:
     return parsing.load_metric_csv(io.BytesIO(data), source_file=name)
@@ -150,7 +156,9 @@ def _cached_parse_event_csv(name: str, data: bytes) -> tuple[pd.DataFrame, list[
 def _parse_all_files() -> None:
     """Re-parse all metric and event files and store in session_state."""
     warns: list[str] = []
-    total_bytes = sum(len(data) for _, data in st.session_state.metric_files + st.session_state.event_files)
+    total_bytes = sum(
+        len(data) for _, data in st.session_state.metric_files + st.session_state.event_files
+    )
     progress = st.progress(0, text="Parsing uploaded files...") if total_bytes > 1_000_000 else None
     total_files = len(st.session_state.metric_files) + len(st.session_state.event_files)
     parsed_files = 0
@@ -164,15 +172,15 @@ def _parse_all_files() -> None:
             long_dfs.append(df)
         parsed_files += 1
         if progress and total_files:
-            progress.progress(parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files")
+            progress.progress(
+                parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files"
+            )
 
     st.session_state.long_df = parsing.combine_long_dfs(long_dfs) if long_dfs else None
     if st.session_state.schema_validation_enabled:
         warns.extend(
             schemas.validate_long_df(
-                st.session_state.long_df
-                if st.session_state.long_df is not None
-                else pd.DataFrame()
+                st.session_state.long_df if st.session_state.long_df is not None else pd.DataFrame()
             )
         )
 
@@ -185,7 +193,9 @@ def _parse_all_files() -> None:
             ev_dfs.append(df)
         parsed_files += 1
         if progress and total_files:
-            progress.progress(parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files")
+            progress.progress(
+                parsed_files / total_files, text=f"Parsed {parsed_files}/{total_files} files"
+            )
 
     st.session_state.event_df = ev_mod.combine_event_dfs(ev_dfs) if ev_dfs else None
     if st.session_state.schema_validation_enabled:
@@ -231,7 +241,9 @@ def _facility_events_as_event_df(facility_events: pd.DataFrame | None) -> pd.Dat
                 "source_file": "manual_facility_events",
                 "group_id": str(row.get("affected_groups", "")).strip() or pd.NA,
                 "subject_id": pd.NA,
-                "event_scope": "facility" if not str(row.get("affected_groups", "")).strip() else "group",
+                "event_scope": "facility"
+                if not str(row.get("affected_groups", "")).strip()
+                else "group",
                 "event_type": "FACILITY_EVENT",
                 "timestamp": start,
                 "timestamp_utc": start,
@@ -272,6 +284,7 @@ def _add_empty_baseline_columns(df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # Full preprocessing pipeline
 # ---------------------------------------------------------------------------
+
 
 def _run_pipeline() -> None:
     """
@@ -326,9 +339,7 @@ def _run_pipeline() -> None:
             except Exception:
                 pass
 
-        win_df = exclusions.compute_exclusion_windows(
-            event_df, st.session_state.exclusion_rules
-        )
+        win_df = exclusions.compute_exclusion_windows(event_df, st.session_state.exclusion_rules)
         df, log_df = exclusions.apply_exclusions(df, win_df)
     else:
         df["is_excluded"] = False
@@ -363,8 +374,11 @@ def _run_pipeline() -> None:
             "time_from_event columns will be absent."
         )
         for col in (
-            "alignment_event_type", "alignment_timestamp",
-            "time_from_event_seconds", "time_from_event_hours", "experimental_day"
+            "alignment_event_type",
+            "alignment_timestamp",
+            "time_from_event_seconds",
+            "time_from_event_hours",
+            "experimental_day",
         ):
             df[col] = None
 
@@ -412,6 +426,7 @@ def _run_pipeline() -> None:
 # UX scaffolding helpers
 # ---------------------------------------------------------------------------
 
+
 def _normalise_metadata_table(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     """Ensure edited/re-uploaded metadata retains expected columns, then keep extras."""
     out = df.copy()
@@ -442,10 +457,7 @@ def _workflow_steps() -> list[dict[str, str]]:
 
     metadata_ready = has_metric
     metadata_done = (
-        metadata_ready
-        and subject_meta is not None
-        and group_meta is not None
-        and not meta_errors
+        metadata_ready and subject_meta is not None and group_meta is not None and not meta_errors
     )
 
     baseline_summary = st.session_state.baseline_summary
@@ -460,7 +472,9 @@ def _workflow_steps() -> list[dict[str, str]]:
         {
             "label": "1. Import",
             "status": _status(has_metric, True),
-            "detail": f"{len(long_df):,} metric rows" if has_metric else "Load metric CSVs or examples.",
+            "detail": f"{len(long_df):,} metric rows"
+            if has_metric
+            else "Load metric CSVs or examples.",
         },
         {
             "label": "2. Validate",
@@ -507,7 +521,9 @@ def _workflow_steps() -> list[dict[str, str]]:
         {
             "label": "6. QC Plots",
             "status": _status(has_processed, has_metric),
-            "detail": "Processed plots are available." if has_processed else "Raw preview is available after import.",
+            "detail": "Processed plots are available."
+            if has_processed
+            else "Raw preview is available after import.",
         },
         {
             "label": "7. Export",
@@ -606,10 +622,11 @@ def _render_next_step_button(current_step_label: str) -> None:
 # Load-status helper
 # ---------------------------------------------------------------------------
 
+
 def _file_status_card(label: str, name: str, n_bytes: int, extra: str = "") -> None:
     """Render a single loaded-file status row."""
     kb = n_bytes / 1024
-    size_str = f"{kb:,.0f} KB" if kb < 1024 else f"{kb/1024:,.1f} MB"
+    size_str = f"{kb:,.0f} KB" if kb < 1024 else f"{kb / 1024:,.1f} MB"
     icon = {"Metric": "📈", "Events": "🗓️"}.get(label, "📄")
     st.markdown(
         f"&nbsp;&nbsp;{icon} **{label}** &nbsp;`{name}`&nbsp; "
@@ -756,7 +773,11 @@ def _alignment_preview_table(
 
     pairs = long_df[["subject_id", "group_id"]].drop_duplicates().copy()
     rows: list[dict[str, Any]] = []
-    fallback_ts = pd.to_datetime(fallback_timestamp, utc=True, errors="coerce") if fallback_timestamp else pd.NaT
+    fallback_ts = (
+        pd.to_datetime(fallback_timestamp, utc=True, errors="coerce")
+        if fallback_timestamp
+        else pd.NaT
+    )
     events = event_df if event_df is not None else pd.DataFrame()
 
     for _, pair in pairs.iterrows():
@@ -815,7 +836,9 @@ def _pipeline_run_summary() -> list[str]:
     event_df = st.session_state.event_df
     if event_df is not None and not event_df.empty:
         event_counts = event_df["event_type"].value_counts().head(6)
-        event_text = ", ".join(f"{event_type}: {count}" for event_type, count in event_counts.items())
+        event_text = ", ".join(
+            f"{event_type}: {count}" for event_type, count in event_counts.items()
+        )
         summary.append(
             f"Events: {len(event_df):,} event rows are loaded. The most frequent event types are {event_text}."
         )
@@ -842,7 +865,9 @@ def _pipeline_run_summary() -> list[str]:
             )
             for event_type, rule in active_rules
         )
-        summary.append(f"Exclusions: matching rows around configured events will be marked using these rules: {rule_text}.")
+        summary.append(
+            f"Exclusions: matching rows around configured events will be marked using these rules: {rule_text}."
+        )
     else:
         summary.append("Exclusions: no event exclusion or flagging rules are active.")
 
@@ -875,11 +900,15 @@ def _pipeline_run_summary() -> list[str]:
             f"Invalid baselines {'will' if bsl.get('impute_from_group_mean', False) else 'will not'} be imputed from group means."
         )
     else:
-        summary.append("Baseline: skipped unless alignment is configured, because the baseline window is relative to time zero.")
+        summary.append(
+            "Baseline: skipped unless alignment is configured, because the baseline window is relative to time zero."
+        )
 
     aggregation_bin = st.session_state.aggregation_bin
     if aggregation_bin is None:
-        summary.append("Aggregation: disabled. The processed output will keep the native time resolution.")
+        summary.append(
+            "Aggregation: disabled. The processed output will keep the native time resolution."
+        )
     else:
         summary.append(
             f"Aggregation: after preprocessing, rows will be combined into {aggregation_bin:g}-second bins to reduce noise and output size."
@@ -929,7 +958,10 @@ def _time_bin_settings(df: pd.DataFrame) -> tuple[str, str | None, str]:
     if _valid_numeric_count(df, "time_from_event_hours") > 0:
         return "alignment", None, "alignment-relative time"
     for timestamp_col in ("timestamp_local", "timestamp_utc"):
-        if timestamp_col in df.columns and pd.to_datetime(df[timestamp_col], errors="coerce").notna().any():
+        if (
+            timestamp_col in df.columns
+            and pd.to_datetime(df[timestamp_col], errors="coerce").notna().any()
+        ):
             return "absolute", timestamp_col, "absolute timestamps"
     return "alignment", None, "alignment-relative time"
 
@@ -938,7 +970,10 @@ def _auc_settings(df: pd.DataFrame) -> tuple[str | None, float | None, float | N
     if _valid_numeric_count(df, "time_from_event_hours") > 0:
         return "time_from_event_hours", 0.0, 168.0, "alignment-relative hours"
     for timestamp_col in ("timestamp_local", "timestamp_utc"):
-        if timestamp_col in df.columns and pd.to_datetime(df[timestamp_col], errors="coerce").notna().any():
+        if (
+            timestamp_col in df.columns
+            and pd.to_datetime(df[timestamp_col], errors="coerce").notna().any()
+        ):
             return timestamp_col, None, None, "full available timestamp range"
     return None, None, None, "no valid time coordinate"
 
@@ -982,7 +1017,9 @@ def _circadian_profile(
 
     data = df.copy()
     data["timestamp_local"] = pd.to_datetime(data["timestamp_local"], errors="coerce")
-    data["zeitgeber_time_hours"] = pd.to_numeric(data["zeitgeber_time_hours"], errors="coerce") % 24.0
+    data["zeitgeber_time_hours"] = (
+        pd.to_numeric(data["zeitgeber_time_hours"], errors="coerce") % 24.0
+    )
     data[value_col] = pd.to_numeric(data[value_col], errors="coerce")
     data = data.dropna(subset=["timestamp_local", "zeitgeber_time_hours", "subject_id", value_col])
     if data.empty:
@@ -1007,7 +1044,9 @@ def _circadian_profile(
         else:
             window_end = (dark_onset + 3.0) % 24.0
             if window_end > dark_onset:
-                in_window = data["zeitgeber_time_hours"].between(dark_onset, window_end, inclusive="left")
+                in_window = data["zeitgeber_time_hours"].between(
+                    dark_onset, window_end, inclusive="left"
+                )
             else:
                 in_window = (data["zeitgeber_time_hours"] >= dark_onset) | (
                     data["zeitgeber_time_hours"] < window_end
@@ -1134,9 +1173,7 @@ def _render_raw_import_preview() -> None:
 
     st.divider()
     st.subheader("Raw data preview with events")
-    st.caption(
-        "Confirm which event file belongs with each activity/metric file before plotting."
-    )
+    st.caption("Confirm which event file belongs with each activity/metric file before plotting.")
 
     _sync_raw_event_file_mapping()
     metric_names = [name for name, _ in st.session_state.metric_files]
@@ -1172,14 +1209,11 @@ def _render_raw_import_preview() -> None:
         key="raw_event_mapping_editor",
     )
     st.session_state.raw_event_file_mapping = {
-        str(row["metric_file"]): str(row["event_file"])
-        for _, row in edited_mapping.iterrows()
+        str(row["metric_file"]): str(row["event_file"]) for _, row in edited_mapping.iterrows()
     }
 
     source_options = [
-        name
-        for name in metric_names
-        if name in set(long_df["source_file"].dropna().astype(str))
+        name for name in metric_names if name in set(long_df["source_file"].dropna().astype(str))
     ]
     if not source_options:
         return
@@ -1204,11 +1238,15 @@ def _render_raw_import_preview() -> None:
         else []
     )
     with c2:
-        selected_metric = st.selectbox(
-            "Metric",
-            metric_options,
-            key="raw_preview_metric_name",
-        ) if metric_options else None
+        selected_metric = (
+            st.selectbox(
+                "Metric",
+                metric_options,
+                key="raw_preview_metric_name",
+            )
+            if metric_options
+            else None
+        )
     with c3:
         selected_subjects = st.multiselect(
             "Subjects",
@@ -1297,9 +1335,8 @@ def _render_load_status() -> None:
                     n_rows = len(sub)
                     nb = sub["native_bin_seconds"].dropna()
                     bin_str = f"{nb.mode().iloc[0]:.0f}s bins" if not nb.empty else ""
-                    extra = (
-                        f"{n_rows:,} rows · {n_subj} subjects · groups: {groups}"
-                        + (f" · {bin_str}" if bin_str else "")
+                    extra = f"{n_rows:,} rows · {n_subj} subjects · groups: {groups}" + (
+                        f" · {bin_str}" if bin_str else ""
                     )
             _file_status_card("Metric", name, len(data), extra)
     else:
@@ -1333,9 +1370,7 @@ def _render_load_status() -> None:
     )
 
     aln_cfg = st.session_state.alignment_cfg
-    has_alignment_cfg = bool(
-        aln_cfg.get("event_type") or aln_cfg.get("fallback_timestamp")
-    )
+    has_alignment_cfg = bool(aln_cfg.get("event_type") or aln_cfg.get("fallback_timestamp"))
 
     def _stage(icon: str, label: str, detail: str = "") -> None:
         suffix = f"  <span style='color:grey;font-size:0.85em'>{detail}</span>" if detail else ""
@@ -1354,12 +1389,16 @@ def _render_load_status() -> None:
     _stage(
         "✅" if has_subj_meta else ("⬜" if has_metric else "🔒"),
         "**Subject metadata initialised**",
-        "edit in Tab 3" if has_subj_meta else ("auto-built — go to Tab 3" if has_metric else "load data first"),
+        "edit in Tab 3"
+        if has_subj_meta
+        else ("auto-built — go to Tab 3" if has_metric else "load data first"),
     )
     _stage(
         "✅" if has_alignment_cfg else ("⬜" if has_metric else "🔒"),
         "**Alignment configured**",
-        f"event: {aln_cfg.get('event_type') or 'manual'}" if has_alignment_cfg else "configure in Tab 4",
+        f"event: {aln_cfg.get('event_type') or 'manual'}"
+        if has_alignment_cfg
+        else "configure in Tab 4",
     )
     _stage(
         "✅" if has_processed else ("⬜" if has_metric else "🔒"),
@@ -1383,6 +1422,7 @@ def _render_load_status() -> None:
 # ---------------------------------------------------------------------------
 # Tab 1: Import
 # ---------------------------------------------------------------------------
+
 
 def _tab_import() -> None:
     st.header("Data Import")
@@ -1457,6 +1497,7 @@ def _tab_import() -> None:
 # Tab 2: Validate
 # ---------------------------------------------------------------------------
 
+
 def _tab_validate() -> None:
     st.header("Data Validation")
     render_contextual_help("validate")
@@ -1471,10 +1512,26 @@ def _tab_validate() -> None:
     # Metric data overview
     st.subheader("Metric data overview")
 
-    groups = sorted(long_df["group_id"].dropna().unique().tolist()) if "group_id" in long_df.columns else []
-    subjects = sorted(long_df["subject_id"].dropna().unique().tolist()) if "subject_id" in long_df.columns else []
-    metrics = sorted(long_df["metric_name"].dropna().unique().tolist()) if "metric_name" in long_df.columns else []
-    sources = sorted(long_df["source_file"].dropna().unique().tolist()) if "source_file" in long_df.columns else []
+    groups = (
+        sorted(long_df["group_id"].dropna().unique().tolist())
+        if "group_id" in long_df.columns
+        else []
+    )
+    subjects = (
+        sorted(long_df["subject_id"].dropna().unique().tolist())
+        if "subject_id" in long_df.columns
+        else []
+    )
+    metrics = (
+        sorted(long_df["metric_name"].dropna().unique().tolist())
+        if "metric_name" in long_df.columns
+        else []
+    )
+    sources = (
+        sorted(long_df["source_file"].dropna().unique().tolist())
+        if "source_file" in long_df.columns
+        else []
+    )
 
     ts_range = "N/A"
     if "timestamp_utc" in long_df.columns:
@@ -1521,25 +1578,36 @@ def _tab_validate() -> None:
         if "event_type" in event_df.columns:
             vc = event_df["event_type"].value_counts().reset_index()
             vc.columns = ["event_type", "count"]
-            st.dataframe(vc, width='stretch', hide_index=True)
+            st.dataframe(vc, width="stretch", hide_index=True)
     else:
         st.info("No event data loaded.")
 
     # Data preview
     st.subheader("Long-format data preview (first 200 rows)")
     preview_cols = [
-        c for c in [
-            "source_file", "metric_name", "group_id", "subject_id",
-            "timestamp", "relative_time_seconds", "value",
-            "group_avg", "group_sem", "samples", "native_bin_seconds"
-        ] if c in long_df.columns
+        c
+        for c in [
+            "source_file",
+            "metric_name",
+            "group_id",
+            "subject_id",
+            "timestamp",
+            "relative_time_seconds",
+            "value",
+            "group_avg",
+            "group_sem",
+            "samples",
+            "native_bin_seconds",
+        ]
+        if c in long_df.columns
     ]
-    st.dataframe(long_df[preview_cols].head(200), width='stretch', hide_index=True)
+    st.dataframe(long_df[preview_cols].head(200), width="stretch", hide_index=True)
 
 
 # ---------------------------------------------------------------------------
 # Tab 3: Metadata & Study Design
 # ---------------------------------------------------------------------------
+
 
 def _tab_metadata() -> None:
     st.header("Experiment Metadata & Study Design")
@@ -1610,7 +1678,7 @@ def _tab_metadata() -> None:
     )
     edited_subject = st.data_editor(
         st.session_state.subject_meta,
-        width='stretch',
+        width="stretch",
         num_rows="dynamic",
         column_config=subject_column_config(),
         key="subject_meta_editor",
@@ -1643,9 +1711,7 @@ def _tab_metadata() -> None:
             st.error(f"Could not read metadata file: {exc}")
 
     # Validation
-    errors, meta_warns = meta_mod.validate_subject_metadata(
-        st.session_state.subject_meta, long_df
-    )
+    errors, meta_warns = meta_mod.validate_subject_metadata(st.session_state.subject_meta, long_df)
     if errors:
         for e in errors:
             st.error(e)
@@ -1691,7 +1757,7 @@ def _tab_metadata() -> None:
 
     edited_group = st.data_editor(
         st.session_state.group_meta,
-        width='stretch',
+        width="stretch",
         num_rows="fixed",
         column_config=group_column_config(),
         key="group_meta_editor",
@@ -1702,15 +1768,21 @@ def _tab_metadata() -> None:
 
     with st.expander("Assign animals to groups", expanded=False):
         if st.session_state.subject_meta is not None and not st.session_state.subject_meta.empty:
-            subjects = sorted(st.session_state.subject_meta["subject_id"].dropna().astype(str).unique().tolist())
+            subjects = sorted(
+                st.session_state.subject_meta["subject_id"].dropna().astype(str).unique().tolist()
+            )
             assigned_updates: dict[str, str] = {}
             for _, group_row in st.session_state.group_meta.iterrows():
                 label = str(group_row.get("group_label") or group_row.get("group_id") or "").strip()
                 if not label:
                     continue
-                current_subjects = st.session_state.subject_meta[
-                    st.session_state.subject_meta["treatment_group"].astype(str) == label
-                ]["subject_id"].astype(str).tolist()
+                current_subjects = (
+                    st.session_state.subject_meta[
+                        st.session_state.subject_meta["treatment_group"].astype(str) == label
+                    ]["subject_id"]
+                    .astype(str)
+                    .tolist()
+                )
                 selected_subjects = st.multiselect(
                     label,
                     subjects,
@@ -1749,7 +1821,9 @@ def _tab_metadata() -> None:
         num_rows="dynamic",
         column_config={
             "animal_id": st.column_config.TextColumn(
-                "Animal ID", help="Animal identifier matching the subject metadata table.", required=True
+                "Animal ID",
+                help="Animal identifier matching the subject metadata table.",
+                required=True,
             ),
             "event_type": st.column_config.TextColumn(
                 "Event type", help="Example: injection, surgery, gavage, drug_on.", required=True
@@ -1770,6 +1844,7 @@ def _tab_metadata() -> None:
 # Tab 4: Events, Alignment & Exclusions
 # ---------------------------------------------------------------------------
 
+
 def _tab_events() -> None:
     st.header("Events, Alignment & Exclusions")
     render_contextual_help("events")
@@ -1781,7 +1856,9 @@ def _tab_events() -> None:
     if event_df is not None and not event_df.empty:
         cage_pairs = exclusions.detect_cage_change_pairs(
             event_df,
-            max_gap_hours=float(st.session_state.exclusion_rules.get("CAGE_CHANGE", {}).get("max_gap_hours", 6.0)),
+            max_gap_hours=float(
+                st.session_state.exclusion_rules.get("CAGE_CHANGE", {}).get("max_gap_hours", 6.0)
+            ),
         )
         if not cage_pairs.empty:
             st.info(
@@ -1811,7 +1888,7 @@ def _tab_events() -> None:
         if sel_sub != "All":
             display_ev = display_ev[display_ev["subject_id"] == sel_sub]
 
-        st.dataframe(display_ev.head(500), width='stretch', hide_index=True)
+        st.dataframe(display_ev.head(500), width="stretch", hide_index=True)
     else:
         st.info("No event file loaded. Alignment and event-based exclusion will be skipped.")
 
@@ -1912,27 +1989,35 @@ def _tab_events() -> None:
             )
             aln["event_type"] = sel_etype
         else:
-            st.info("No events loaded. Use Manual global timestamp if every subject shares one anchor.")
+            st.info(
+                "No events loaded. Use Manual global timestamp if every subject shares one anchor."
+            )
             aln["event_type"] = None
-        aln["fallback_timestamp"] = st.text_input(
-            "Fallback timestamp for missing event anchors",
-            value=aln.get("fallback_timestamp") or "",
-            help=(
-                "Optional ISO timestamp. Used only when no matching event is found for a "
-                "subject or group. Example: 2025-03-18T09:00:00Z."
-            ),
-        ) or None
+        aln["fallback_timestamp"] = (
+            st.text_input(
+                "Fallback timestamp for missing event anchors",
+                value=aln.get("fallback_timestamp") or "",
+                help=(
+                    "Optional ISO timestamp. Used only when no matching event is found for a "
+                    "subject or group. Example: 2025-03-18T09:00:00Z."
+                ),
+            )
+            or None
+        )
 
     elif alignment_mode == "Manual global timestamp":
         aln["event_type"] = None
-        aln["fallback_timestamp"] = st.text_input(
-            "Global time-zero timestamp",
-            value=aln.get("fallback_timestamp") or "",
-            help=(
-                "Required for manual alignment. Every row is aligned to this same ISO "
-                "timestamp. Example: 2025-03-18T09:00:00Z."
-            ),
-        ) or None
+        aln["fallback_timestamp"] = (
+            st.text_input(
+                "Global time-zero timestamp",
+                value=aln.get("fallback_timestamp") or "",
+                help=(
+                    "Required for manual alignment. Every row is aligned to this same ISO "
+                    "timestamp. Example: 2025-03-18T09:00:00Z."
+                ),
+            )
+            or None
+        )
 
     else:  # Disabled
         aln["event_type"] = None
@@ -1970,22 +2055,34 @@ def _tab_events() -> None:
     rules = st.session_state.exclusion_rules
     all_event_types = sorted(
         set(rules.keys())
-        | (set(event_df["event_type"].dropna().unique()) if event_df is not None and not event_df.empty else set())
+        | (
+            set(event_df["event_type"].dropna().unique())
+            if event_df is not None and not event_df.empty
+            else set()
+        )
     )
 
     for etype in all_event_types:
-        rule = rules.get(etype, {"before_hours": 0.0, "after_hours": 0.0, "exclude": False, "flag": False})
+        rule = rules.get(
+            etype, {"before_hours": 0.0, "after_hours": 0.0, "exclude": False, "flag": False}
+        )
         with st.expander(f"Rule: {etype}", expanded=etype in cfg.DEFAULT_EXCLUSION_RULES):
             c1, c2, c3, c4 = st.columns(4)
             with c1:
                 before = st.number_input(
-                    "Before REMOVED / event (h)", value=float(rule.get("before_hours", 0.0)),
-                    min_value=0.0, step=1.0, key=f"excl_before_{etype}"
+                    "Before REMOVED / event (h)",
+                    value=float(rule.get("before_hours", 0.0)),
+                    min_value=0.0,
+                    step=1.0,
+                    key=f"excl_before_{etype}",
                 )
             with c2:
                 after = st.number_input(
-                    "After INSERTED / event (h)", value=float(rule.get("after_hours", 0.0)),
-                    min_value=0.0, step=1.0, key=f"excl_after_{etype}"
+                    "After INSERTED / event (h)",
+                    value=float(rule.get("after_hours", 0.0)),
+                    min_value=0.0,
+                    step=1.0,
+                    key=f"excl_after_{etype}",
                 )
             with c3:
                 do_excl = st.checkbox(
@@ -2019,6 +2116,7 @@ def _tab_events() -> None:
 # ---------------------------------------------------------------------------
 # Tab 5: Baseline, Aggregation & Pipeline
 # ---------------------------------------------------------------------------
+
 
 def _tab_baseline() -> None:
     st.header("Baseline, Aggregation & Pipeline")
@@ -2086,7 +2184,9 @@ def _tab_baseline() -> None:
                 column_config={
                     "subject_id": st.column_config.TextColumn("Subject ID", required=True),
                     "metric_name": st.column_config.TextColumn("Metric", required=True),
-                    "baseline_value": st.column_config.NumberColumn("Baseline value", required=True),
+                    "baseline_value": st.column_config.NumberColumn(
+                        "Baseline value", required=True
+                    ),
                     "notes": st.column_config.TextColumn("Notes"),
                 },
                 key="baseline_overrides_editor",
@@ -2146,9 +2246,12 @@ def _tab_baseline() -> None:
                 st.metric("Aligned rows", f"{n_aligned:,}")
 
         # Baseline summary table
-        if st.session_state.baseline_summary is not None and not st.session_state.baseline_summary.empty:
+        if (
+            st.session_state.baseline_summary is not None
+            and not st.session_state.baseline_summary.empty
+        ):
             st.subheader("Baseline validity per subject/metric")
-            st.dataframe(st.session_state.baseline_summary, width='stretch', hide_index=True)
+            st.dataframe(st.session_state.baseline_summary, width="stretch", hide_index=True)
 
         # Warnings
         warns = st.session_state.all_warnings
@@ -2161,6 +2264,7 @@ def _tab_baseline() -> None:
 # ---------------------------------------------------------------------------
 # Tab 6: QC Plots
 # ---------------------------------------------------------------------------
+
 
 def _tab_qc() -> None:
     st.header("QC Visualisations")
@@ -2199,7 +2303,10 @@ def _tab_qc() -> None:
                 st.warning(f"{len(flagged)} subject/metric stream(s) have quality flags.")
             st.dataframe(quality_report, width="stretch", hide_index=True)
 
-        if st.session_state.baseline_summary is not None and not st.session_state.baseline_summary.empty:
+        if (
+            st.session_state.baseline_summary is not None
+            and not st.session_state.baseline_summary.empty
+        ):
             with _working_status(
                 "Drawing baseline quality heatmap",
                 "The app is visualizing baseline coverage and validity across subjects and metrics.",
@@ -2207,15 +2314,29 @@ def _tab_qc() -> None:
                 baseline_fig = qc.plot_baseline_quality_heatmap(st.session_state.baseline_summary)
             st.plotly_chart(baseline_fig, width="stretch")
 
-    metrics = sorted(display_df["metric_name"].dropna().unique().tolist()) if "metric_name" in display_df.columns else []
-    subjects = sorted(display_df["subject_id"].dropna().unique().tolist()) if "subject_id" in display_df.columns else []
-    groups = sorted(display_df["group_id"].dropna().unique().tolist()) if "group_id" in display_df.columns else []
+    metrics = (
+        sorted(display_df["metric_name"].dropna().unique().tolist())
+        if "metric_name" in display_df.columns
+        else []
+    )
+    subjects = (
+        sorted(display_df["subject_id"].dropna().unique().tolist())
+        if "subject_id" in display_df.columns
+        else []
+    )
+    groups = (
+        sorted(display_df["group_id"].dropna().unique().tolist())
+        if "group_id" in display_df.columns
+        else []
+    )
 
     c1, c2, c3 = st.columns([2, 3, 2])
     with c1:
         sel_metric = st.selectbox("Metric", metrics) if metrics else None
     with c2:
-        sel_subjects = st.multiselect("Subjects (leave empty = all)", subjects, default=subjects[:6])
+        sel_subjects = st.multiselect(
+            "Subjects (leave empty = all)", subjects, default=subjects[:6]
+        )
     with c3:
         sel_groups = st.multiselect("Groups", groups, default=groups)
 
@@ -2235,15 +2356,19 @@ def _tab_qc() -> None:
         "The app is plotting subject-level raw traces and marking excluded periods when available.",
     ):
         fig1 = qc.plot_raw_timeseries(
-            display_df, sel_metric,
+            display_df,
+            sel_metric,
             subjects=sel_subjects if sel_subjects else None,
             x_col=x_col,
             show_exclusions=True,
         )
-    st.plotly_chart(fig1, width='stretch')
+    st.plotly_chart(fig1, width="stretch")
 
     # Plot 2: Aligned timeseries
-    if "time_from_event_hours" in display_df.columns and not display_df["time_from_event_hours"].isna().all():
+    if (
+        "time_from_event_hours" in display_df.columns
+        and not display_df["time_from_event_hours"].isna().all()
+    ):
         st.subheader("Aligned timeseries")
         bsl_cfg = st.session_state.baseline_cfg
         with _working_status(
@@ -2251,7 +2376,8 @@ def _tab_qc() -> None:
             "The app is plotting traces relative to the alignment anchor and shading the baseline window.",
         ):
             fig2 = qc.plot_aligned_timeseries(
-                display_df, sel_metric,
+                display_df,
+                sel_metric,
                 subjects=sel_subjects if sel_subjects else None,
                 y_col=sel_y,
                 show_exclusions=True,
@@ -2259,7 +2385,7 @@ def _tab_qc() -> None:
                 baseline_start_h=float(bsl_cfg.get("start_hours", -72)),
                 baseline_end_h=float(bsl_cfg.get("end_hours", -24)),
             )
-        st.plotly_chart(fig2, width='stretch')
+        st.plotly_chart(fig2, width="stretch")
 
         # Plot 3: Group mean
         st.subheader("Group mean ± SEM")
@@ -2268,11 +2394,12 @@ def _tab_qc() -> None:
             "The app is summarizing selected subjects into group mean traces with SEM bands.",
         ):
             fig3 = qc.plot_group_mean_timeseries(
-                display_df, sel_metric,
+                display_df,
+                sel_metric,
                 y_col=sel_y,
                 groups=sel_groups if sel_groups else None,
             )
-        st.plotly_chart(fig3, width='stretch')
+        st.plotly_chart(fig3, width="stretch")
     else:
         st.info("Run alignment (Tab 4) and the pipeline (Tab 5) to see aligned plots.")
 
@@ -2280,6 +2407,7 @@ def _tab_qc() -> None:
 # ---------------------------------------------------------------------------
 # Tab 7: Export
 # ---------------------------------------------------------------------------
+
 
 def _tab_export() -> None:
     st.header("Export")
@@ -2303,7 +2431,9 @@ def _tab_export() -> None:
     aln_cfg = st.session_state.alignment_cfg
     bsl_cfg = st.session_state.baseline_cfg
 
-    uploaded_names = [name for name, _ in st.session_state.metric_files + st.session_state.event_files]
+    uploaded_names = [
+        name for name, _ in st.session_state.metric_files + st.session_state.event_files
+    ]
 
     analysis_config = exp_mod.build_analysis_config(
         uploaded_files=uploaded_names,
@@ -2416,7 +2546,9 @@ def _tab_export() -> None:
             )
             if estimated_bytes > 500_000_000:
                 tmp_dir = Path(tempfile.mkdtemp(prefix="dvc_export_"))
-                zip_path = exp_mod.create_export_zip_file(tmp_dir / "DVC_Workbench_Export.zip", **export_kwargs)
+                zip_path = exp_mod.create_export_zip_file(
+                    tmp_dir / "DVC_Workbench_Export.zip", **export_kwargs
+                )
                 zip_data = open(zip_path, "rb")
             else:
                 zip_data = exp_mod.create_export_zip(**export_kwargs)
@@ -2476,8 +2608,15 @@ def _tab_export() -> None:
             )
             or fname in analysis_tables_for_export
             or (fname == "figures/" and bool(st.session_state.analysis_figures))
-            or fname in ("study_metadata.yaml", "analysis_config.yaml", "processing_report.md",
-                         "metadata_validation_report.md", "event_metadata.csv", "manifest.yaml")
+            or fname
+            in (
+                "study_metadata.yaml",
+                "analysis_config.yaml",
+                "processing_report.md",
+                "metadata_validation_report.md",
+                "event_metadata.csv",
+                "manifest.yaml",
+            )
         )
         icon = "✓" if included else "–"
         st.write(f"{icon} `{fname}`")
@@ -2486,6 +2625,7 @@ def _tab_export() -> None:
 # ---------------------------------------------------------------------------
 # Tab 8: Analysis
 # ---------------------------------------------------------------------------
+
 
 def _tab_analysis() -> None:
     st.header("Exploratory Analysis")
@@ -2499,7 +2639,11 @@ def _tab_analysis() -> None:
         st.info("Run the preprocessing pipeline before using the analysis page.")
         return
 
-    metrics = sorted(proc["metric_name"].dropna().unique().tolist()) if "metric_name" in proc.columns else []
+    metrics = (
+        sorted(proc["metric_name"].dropna().unique().tolist())
+        if "metric_name" in proc.columns
+        else []
+    )
     if not metrics:
         st.info("No metric column available.")
         return
@@ -2524,7 +2668,11 @@ def _tab_analysis() -> None:
     if value_notice:
         st.info(value_notice)
 
-    subjects = sorted(metric_df["subject_id"].dropna().astype(str).unique().tolist()) if "subject_id" in metric_df.columns else []
+    subjects = (
+        sorted(metric_df["subject_id"].dropna().astype(str).unique().tolist())
+        if "subject_id" in metric_df.columns
+        else []
+    )
 
     raw_c1, raw_c2 = st.columns([3, 2])
     with raw_c1:
@@ -2535,13 +2683,18 @@ def _tab_analysis() -> None:
             key="analysis_raw_subjects",
         )
     with raw_c2:
-        show_events = st.checkbox("Show events on raw trace", value=True, key="analysis_show_events")
+        show_events = st.checkbox(
+            "Show events on raw trace", value=True, key="analysis_show_events"
+        )
 
     max_available_days = 1
     if "timestamp_local" in metric_df.columns:
         ts_for_days = pd.to_datetime(metric_df["timestamp_local"], errors="coerce").dropna()
         if not ts_for_days.empty:
-            max_available_days = max(1, int((ts_for_days.dt.normalize().max() - ts_for_days.dt.normalize().min()).days) + 1)
+            max_available_days = max(
+                1,
+                int((ts_for_days.dt.normalize().max() - ts_for_days.dt.normalize().min()).days) + 1,
+            )
 
     circ_c1, circ_c2, circ_c3 = st.columns(3)
     with circ_c1:
@@ -2554,7 +2707,9 @@ def _tab_analysis() -> None:
             key="analysis_circ_days",
         )
     with circ_c2:
-        circ_bin = st.selectbox("Circadian ZT bin", [0.5, 1.0, 2.0, 3.0], index=1, key="analysis_circ_bin")
+        circ_bin = st.selectbox(
+            "Circadian ZT bin", [0.5, 1.0, 2.0, 3.0], index=1, key="analysis_circ_bin"
+        )
     with circ_c3:
         circ_norm = st.selectbox(
             "Circadian normalization",
@@ -2606,9 +2761,13 @@ def _tab_analysis() -> None:
         event_df = st.session_state.event_df
         if show_events and event_df is not None and not event_df.empty:
             event_x_col = x_col if x_col in event_df.columns else "timestamp_utc"
-            raw_values = pd.to_numeric(metric_df[sel_value if sel_value in metric_df.columns else "value"], errors="coerce")
+            raw_values = pd.to_numeric(
+                metric_df[sel_value if sel_value in metric_df.columns else "value"], errors="coerce"
+            )
             if raw_values.notna().any():
-                _add_event_overlay(raw_fig, event_df, x_col=event_x_col, y_value=float(raw_values.max()))
+                _add_event_overlay(
+                    raw_fig, event_df, x_col=event_x_col, y_value=float(raw_values.max())
+                )
     st.plotly_chart(raw_fig, width="stretch")
 
     with _working_status(
@@ -2644,14 +2803,14 @@ def _tab_analysis() -> None:
             **auc_kwargs,
         )
         stats, stats_warns = (
-            analysis.quick_exploratory_stats(auc, value_col="auc") if not auc.empty else (pd.DataFrame(), [])
+            analysis.quick_exploratory_stats(auc, value_col="auc")
+            if not auc.empty
+            else (pd.DataFrame(), [])
         )
         nonparam_circadian, np_circ_warns = analysis.summarize_nonparametric_circadian(
             metric_df, value_col="value"
         )
-        activity_bouts, bout_warns = analysis.summarize_activity_bouts(
-            metric_df, value_col="value"
-        )
+        activity_bouts, bout_warns = analysis.summarize_activity_bouts(metric_df, value_col="value")
         period_estimate, period_warns = analysis.estimate_period(metric_df, value_col="value")
         analysis_warns = (
             circ_warns
@@ -2670,11 +2829,15 @@ def _tab_analysis() -> None:
             zt_bin_hours=float(circ_bin),
             normalize_mode=circ_norm,
         )
-        circadian_profile_issue = _circadian_profile_issue(
-            metric_df,
-            value_col=sel_value,
-            max_days=int(circ_days),
-        ) if circadian_profile.empty else None
+        circadian_profile_issue = (
+            _circadian_profile_issue(
+                metric_df,
+                value_col=sel_value,
+                max_days=int(circ_days),
+            )
+            if circadian_profile.empty
+            else None
+        )
 
     st.session_state.analysis_tables = {
         "daily_means.csv": time_bins,
@@ -2858,8 +3021,10 @@ def _render_circadiem_panel(metric_df: pd.DataFrame, *, value_col: str) -> None:
     zt_bin = float(st.session_state.get("analysis_circ_bin", 1.0) or 1.0)
 
     # One VCG image per group, labeled by group — maps scores onto group entities.
-    label_col = "group_label" if "group_label" in metric_df.columns else (
-        "group_id" if "group_id" in metric_df.columns else None
+    label_col = (
+        "group_label"
+        if "group_label" in metric_df.columns
+        else ("group_id" if "group_id" in metric_df.columns else None)
     )
     if label_col is not None:
         groups = [g for g in metric_df[label_col].dropna().astype(str).unique().tolist()]
@@ -2962,8 +3127,7 @@ def _build_insight_artifacts(
     if not analysis_tables:
         return {}
     tables = {
-        name[:-4] if name.endswith(".csv") else name: df
-        for name, df in analysis_tables.items()
+        name[:-4] if name.endswith(".csv") else name: df for name, df in analysis_tables.items()
     }
     payload = insights.build_insight_payload(
         tables,
@@ -3050,7 +3214,9 @@ def _insights_egress_note(choice: str) -> str:
 def _make_narrative_provider(choice: str, kwargs: dict):
     """Build the chosen narrative provider, or None for the offline default."""
     if choice == _INSIGHT_OLLAMA:
-        return insights.OllamaProvider(model=kwargs.get("model") or "llama3.1", host=kwargs.get("host"))
+        return insights.OllamaProvider(
+            model=kwargs.get("model") or "llama3.1", host=kwargs.get("host")
+        )
     if choice == _INSIGHT_ANTHROPIC:
         model = (kwargs.get("model") or "").strip()
         if not model:
@@ -3094,7 +3260,9 @@ def _render_insights_panel(config_summary: dict) -> None:
         st.markdown(result.text)
         st.session_state.insights_narrative = result
     else:
-        if st.button(f"Generate narrative with {choice.split(' —')[0].split(' (')[0]}", type="primary"):
+        if st.button(
+            f"Generate narrative with {choice.split(' —')[0].split(' (')[0]}", type="primary"
+        ):
             with _working_status(
                 "Generating model narrative",
                 "Sending the aggregated summary tables (not raw data) to the selected model.",
@@ -3116,7 +3284,9 @@ def _render_insights_panel(config_summary: dict) -> None:
             usage.append(f"payload `{saved.payload_sha256[:12]}…`")
             st.caption("Provenance: " + " · ".join(usage))
         else:
-            st.caption("Configure the engine above and click generate. The offline summary is still exported.")
+            st.caption(
+                "Configure the engine above and click generate. The offline summary is still exported."
+            )
 
     methods = insights.draft_methods_section(config_summary)
     with st.expander("Draft methods paragraph", expanded=False):
@@ -3204,8 +3374,12 @@ def _render_qa_panel(config_summary: dict) -> None:
                 model = (kwargs.get("model") or "").strip()
                 if not model:
                     raise ValueError("Enter a Claude model id to ask a question.")
-                provider = insights.AnthropicToolProvider(model=model, api_key=(kwargs.get("api_key") or None))
-                st.session_state.qa_result = insights.answer_question(question.strip(), proc, provider)
+                provider = insights.AnthropicToolProvider(
+                    model=model, api_key=(kwargs.get("api_key") or None)
+                )
+                st.session_state.qa_result = insights.answer_question(
+                    question.strip(), proc, provider
+                )
             except (RuntimeError, ValueError) as exc:
                 st.session_state.qa_result = None
                 st.error(str(exc))
@@ -3223,6 +3397,7 @@ def _render_qa_panel(config_summary: dict) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     st.set_page_config(

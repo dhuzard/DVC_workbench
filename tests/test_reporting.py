@@ -38,7 +38,5 @@ def test_report_timestamp_has_no_human_artifact():
     assert "%H" not in report
 
     # The Generated line must contain a well-formed UTC timestamp.
-    match = re.search(
-        r"\*\*Generated:\*\* (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)", report
-    )
+    match = re.search(r"\*\*Generated:\*\* (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC)", report)
     assert match, f"No valid timestamp found in report:\n{report}"

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+__all__ = [
+    "DVCApiAdapter",
+]
+
 
 class DVCApiAdapter:
     """Placeholder for future direct DVC API integration."""

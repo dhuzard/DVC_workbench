@@ -132,8 +132,7 @@ def _safe_records(df: pd.DataFrame | None) -> list[dict[str, Any]]:
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return []
     return [
-        {str(k): _to_jsonable(v) for k, v in row.items()}
-        for row in df.to_dict(orient="records")
+        {str(k): _to_jsonable(v) for k, v in row.items()} for row in df.to_dict(orient="records")
     ]
 
 
@@ -212,11 +211,7 @@ def _table_highlights(name: str, df: pd.DataFrame | None) -> dict[str, Any]:
                 for r in df[keep].to_dict(orient="records")
             ]
     elif name == "nonparametric_circadian":
-        keep = [
-            c
-            for c in ("metric_name", "group_id", "IS", "IV", "RA", "M10", "L5")
-            if c in cols
-        ]
+        keep = [c for c in ("metric_name", "group_id", "IS", "IV", "RA", "M10", "L5") if c in cols]
         if keep:
             hi["nonparametric"] = [
                 {k: _to_jsonable(r.get(k)) for k in keep}
@@ -254,7 +249,12 @@ def _config_summary(analysis_config: dict | None) -> dict[str, Any]:
 def _manifest_summary(manifest: dict | None) -> dict[str, Any]:
     if not manifest:
         return {}
-    inputs = manifest.get("inputs") or manifest.get("input_files") or manifest.get("uploaded_files") or []
+    inputs = (
+        manifest.get("inputs")
+        or manifest.get("input_files")
+        or manifest.get("uploaded_files")
+        or []
+    )
     hashes: list[str] = []
     if isinstance(inputs, (list, tuple)):
         n_inputs = len(inputs)
@@ -271,7 +271,9 @@ def _manifest_summary(manifest: dict | None) -> dict[str, Any]:
         "input_file_count": n_inputs,
         "input_hashes": hashes,
     }
-    return _to_jsonable({k: v for k, v in summary.items() if v not in (None, [], 0) or k == "input_file_count"})
+    return _to_jsonable(
+        {k: v for k, v in summary.items() if v not in (None, [], 0) or k == "input_file_count"}
+    )
 
 
 _QC_FLAGS = (
@@ -288,7 +290,11 @@ _QC_COUNT_FLAGS = (
 
 
 def _qc_summary(quality_report: pd.DataFrame | None) -> dict[str, Any]:
-    if quality_report is None or not isinstance(quality_report, pd.DataFrame) or quality_report.empty:
+    if (
+        quality_report is None
+        or not isinstance(quality_report, pd.DataFrame)
+        or quality_report.empty
+    ):
         return {}
     df = quality_report
     cols = set(df.columns)
@@ -405,9 +411,7 @@ class InsightResult:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     disclaimer: str = INSIGHT_DISCLAIMER
-    generated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -428,10 +432,7 @@ class LLMProvider(Protocol):
     name: str
     model_id: str
 
-    def complete(
-        self, system_prompt: str, payload: dict
-    ) -> tuple[str, int | None, int | None]:
-        ...
+    def complete(self, system_prompt: str, payload: dict) -> tuple[str, int | None, int | None]: ...
 
 
 # --------- narrative formatting helpers shared by NullProvider -------------- #
@@ -454,9 +455,7 @@ def _sentence_groups(highlights: dict) -> list[str]:
         for g in tbl.get("groups", []):
             seen_groups.add(str(g))
     if seen_groups:
-        out.append(
-            "Groups compared: " + ", ".join(sorted(seen_groups)) + "."
-        )
+        out.append("Groups compared: " + ", ".join(sorted(seen_groups)) + ".")
     return out
 
 
@@ -543,7 +542,11 @@ def _sentence_nonparametric(highlights: dict) -> list[str]:
         if not parts:
             continue
         label = " / ".join(str(x) for x in (group, metric) if x)
-        prefix = f"Non-parametric circadian metrics for {label}" if label else "Non-parametric circadian metrics"
+        prefix = (
+            f"Non-parametric circadian metrics for {label}"
+            if label
+            else "Non-parametric circadian metrics"
+        )
         out.append(prefix + ": " + ", ".join(parts) + ".")
     return out
 
@@ -567,9 +570,7 @@ def render_offline_narrative(payload: dict) -> str:
         ld = ""
         if config.get("light_on") is not None and config.get("light_off") is not None:
             ld = f", light cycle {config.get('light_on')}-{config.get('light_off')}"
-        sentences.append(
-            f"Analysis timezone {config.get('timezone', 'unknown')}{ld}."
-        )
+        sentences.append(f"Analysis timezone {config.get('timezone', 'unknown')}{ld}.")
 
     sentences += _sentence_groups(highlights)
     sentences += _sentence_stats(highlights)
@@ -608,9 +609,7 @@ class NullProvider:
     name = "null"
     model_id = "offline-template"
 
-    def complete(
-        self, system_prompt: str, payload: dict
-    ) -> tuple[str, int | None, int | None]:
+    def complete(self, system_prompt: str, payload: dict) -> tuple[str, int | None, int | None]:
         return render_offline_narrative(payload), None, None
 
 
@@ -627,9 +626,7 @@ class OllamaProvider:
         self.name = "ollama"
         self.model_id = model
 
-    def complete(
-        self, system_prompt: str, payload: dict
-    ) -> tuple[str, int | None, int | None]:
+    def complete(self, system_prompt: str, payload: dict) -> tuple[str, int | None, int | None]:
         try:
             import requests  # type: ignore  # noqa: PLC0415
         except ImportError as exc:  # pragma: no cover - depends on env
@@ -699,9 +696,7 @@ class AnthropicProvider:
         self.max_tokens = max_tokens
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
 
-    def complete(
-        self, system_prompt: str, payload: dict
-    ) -> tuple[str, int | None, int | None]:
+    def complete(self, system_prompt: str, payload: dict) -> tuple[str, int | None, int | None]:
         if not self._api_key:
             raise RuntimeError(
                 "AnthropicProvider requires an API key. Pass api_key=... or set "
@@ -720,8 +715,7 @@ class AnthropicProvider:
         client = anthropic.Anthropic(api_key=self._api_key)
         user_content = (
             "Interpret ONLY the following analysis summary payload (JSON). Cite "
-            "its numbers and do not invent any statistic.\n\n"
-            + json.dumps(payload, sort_keys=True)
+            "its numbers and do not invent any statistic.\n\n" + json.dumps(payload, sort_keys=True)
         )
         # Low temperature keeps the interpretation deterministic. Newer Claude
         # models (Opus 4.7+/Fable) reject the `temperature` parameter, so fall
@@ -741,9 +735,7 @@ class AnthropicProvider:
                     raise
                 message = client.messages.create(**create_kwargs)
         except Exception as exc:  # noqa: BLE001 - normalize to a guidance error
-            raise RuntimeError(
-                f"Anthropic request failed for model '{self.model}': {exc}"
-            ) from exc
+            raise RuntimeError(f"Anthropic request failed for model '{self.model}': {exc}") from exc
 
         text_parts = [
             getattr(block, "text", "")
@@ -835,9 +827,7 @@ def draft_methods_section(analysis_config: dict, manifest: dict | None = None) -
     light_on = ld.get("light_on", "?")
     light_off = ld.get("light_off", "?")
     bin_seconds = cfg.get("aggregation_bin_seconds")
-    bin_text = (
-        f"{bin_seconds} s bins" if bin_seconds else "the native acquisition cadence"
-    )
+    bin_text = f"{bin_seconds} s bins" if bin_seconds else "the native acquisition cadence"
     period = cfg.get("cosinor_period_hours", 24)
     fdr = cfg.get("fdr_method", "Benjamini-Hochberg")
 
@@ -1002,13 +992,16 @@ def triage_quality(
         )
     else:
         already_excluded = ""
-        if exclusion_log is not None and isinstance(exclusion_log, pd.DataFrame) and not exclusion_log.empty:
+        if (
+            exclusion_log is not None
+            and isinstance(exclusion_log, pd.DataFrame)
+            and not exclusion_log.empty
+        ):
             if "subject_id" in exclusion_log.columns:
                 excl = sorted({str(s) for s in exclusion_log["subject_id"].dropna().unique()})
                 if excl:
                     already_excluded = (
-                        f" Note: {len(excl)} subject(s) already appear in the "
-                        "exclusion log."
+                        f" Note: {len(excl)} subject(s) already appear in the exclusion log."
                     )
         kinds = sorted({i["issue"] for i in issues})
         summary = (
@@ -1029,24 +1022,21 @@ ANALYSIS_TOOL_REGISTRY: dict[str, str] = {
         "acrophase, R2 and a rhythm-detection p-value with CIs."
     ),
     "summarize_light_dark": (
-        "Summarize mean +/- SEM by light vs dark phase and the dark/light ratio "
-        "per group/metric."
+        "Summarize mean +/- SEM by light vs dark phase and the dark/light ratio per group/metric."
     ),
     "summarize_time_bins": (
         "Summarize group means over daily/weekly/custom time bins, relative to "
         "alignment or absolute calendar time."
     ),
     "compute_auc_per_animal": (
-        "Compute trapezoidal area-under-curve per animal/metric over an optional "
-        "time window."
+        "Compute trapezoidal area-under-curve per animal/metric over an optional time window."
     ),
     "quick_exploratory_stats": (
         "Run subject-level exploratory group comparisons (Mann-Whitney / "
         "Kruskal-Wallis) with effect sizes and Benjamini-Hochberg FDR q-values."
     ),
     "summarize_nonparametric_circadian": (
-        "Compute distribution-free circadian metrics (IS, IV, RA, M10, L5) per "
-        "group/metric."
+        "Compute distribution-free circadian metrics (IS, IV, RA, M10, L5) per group/metric."
     ),
     "summarize_activity_bouts": (
         "Summarize active/inactive bout structure (count, mean/longest duration, "
@@ -1125,16 +1115,20 @@ _TOOL_INPUT_PROPERTIES: dict[str, dict[str, Any]] = {
         "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
         "windows": {
             "type": "array",
-            "description": (
-                "Windows to contrast; each is [label, start, end] in x-axis units."
-            ),
+            "description": ("Windows to contrast; each is [label, start, end] in x-axis units."),
             "items": {"type": "array"},
         },
     },
     "estimate_period": {
         "value_col": {"type": "string", "description": "Metric value column (default 'value')."},
-        "min_period_h": {"type": "number", "description": "Lower period bound in hours (default 18)."},
-        "max_period_h": {"type": "number", "description": "Upper period bound in hours (default 30)."},
+        "min_period_h": {
+            "type": "number",
+            "description": "Lower period bound in hours (default 18).",
+        },
+        "max_period_h": {
+            "type": "number",
+            "description": "Upper period bound in hours (default 30).",
+        },
     },
 }
 
@@ -1197,11 +1191,7 @@ def execute_analysis_tool(
     arguments = arguments or {}
     try:
         params = inspect.signature(func).parameters
-        filtered = {
-            k: v
-            for k, v in arguments.items()
-            if k in params and k != "df"
-        }
+        filtered = {k: v for k, v in arguments.items() if k in params and k != "df"}
     except (TypeError, ValueError):
         filtered = {}
 
@@ -1277,8 +1267,7 @@ class ToolCallingProvider(Protocol):
         system_prompt: str,
         messages: list[dict],
         tools: list[dict],
-    ) -> AssistantTurn:
-        ...
+    ) -> AssistantTurn: ...
 
 
 class AnthropicToolProvider:
@@ -1347,9 +1336,7 @@ class AnthropicToolProvider:
                     raise
                 message = client.messages.create(**create_kwargs)
         except Exception as exc:  # noqa: BLE001 - normalize to a guidance error
-            raise RuntimeError(
-                f"Anthropic request failed for model '{self.model}': {exc}"
-            ) from exc
+            raise RuntimeError(f"Anthropic request failed for model '{self.model}': {exc}") from exc
 
         text_parts: list[str] = []
         tool_calls: list[dict] = []
@@ -1476,9 +1463,7 @@ class QAResult:
     steps: int = 0
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
-    generated_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    generated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     disclaimer: str = INSIGHT_DISCLAIMER
 
     def to_dict(self) -> dict[str, Any]:

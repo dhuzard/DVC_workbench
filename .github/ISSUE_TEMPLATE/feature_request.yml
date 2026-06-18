@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest an improvement or new capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the scientific or workflow need behind the request.
+      placeholder: As a researcher, I need to ... but currently ...
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like the workbench to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false
+  - type: checkboxes
+    id: guardrails
+    attributes:
+      label: Guardrails
+      description: Please confirm this fits the project's principles.
+      options:
+        - label: >-
+            This keeps the local-first privacy model intact (no raw data leaves the
+            machine without explicit opt-in).
+        - label: >-
+            Any statistics involved are exploratory, not confirmatory.

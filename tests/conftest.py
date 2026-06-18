@@ -15,6 +15,7 @@ _EXAMPLES = Path(__file__).parent.parent / "data" / "examples"
 # Synthetic metric data
 # ---------------------------------------------------------------------------
 
+
 def make_metric_df(
     n_rows: int = 10,
     groups: list[str] | None = None,
@@ -42,11 +43,11 @@ def make_metric_df(
             "relativeTime": i * bin_minutes * 60,
         }
         for grp in groups:
-            subj_ids = [f"{grp}_{k+1}" for k in range(subjects_per_group)]
+            subj_ids = [f"{grp}_{k + 1}" for k in range(subjects_per_group)]
             values = np.random.default_rng(i).uniform(0, 10, subjects_per_group)
             row[f"{grp}_TIMESTAMP"] = ts.isoformat()
             row[f"{grp}_AVG"] = float(values.mean())
-            row[f"{grp}_SEM"] = float(values.std() / (subjects_per_group ** 0.5))
+            row[f"{grp}_SEM"] = float(values.std() / (subjects_per_group**0.5))
             row[f"{grp}_QRT"] = str(list(values.tolist()))
             row[f"{grp}_SAMPLES"] = subjects_per_group * 100
             for sid, val in zip(subj_ids, values):
@@ -72,6 +73,7 @@ def make_metric_csv_bytes(
 # ---------------------------------------------------------------------------
 # Synthetic event data
 # ---------------------------------------------------------------------------
+
 
 def make_event_df(
     events: list[dict] | None = None,
@@ -117,6 +119,7 @@ def make_event_csv_bytes(events: list[dict] | None = None) -> bytes:
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def metric_df():

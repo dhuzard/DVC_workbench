@@ -7,6 +7,11 @@ from typing import Any
 
 import pandas as pd
 
+__all__ = [
+    "generate_processing_report",
+    "generate_metadata_validation_report",
+]
+
 
 def generate_processing_report(
     long_df: pd.DataFrame,
@@ -38,8 +43,12 @@ def generate_processing_report(
     # Data overview
     if not long_df.empty:
         groups = long_df["group_id"].unique().tolist() if "group_id" in long_df.columns else []
-        subjects = long_df["subject_id"].unique().tolist() if "subject_id" in long_df.columns else []
-        metrics = long_df["metric_name"].unique().tolist() if "metric_name" in long_df.columns else []
+        subjects = (
+            long_df["subject_id"].unique().tolist() if "subject_id" in long_df.columns else []
+        )
+        metrics = (
+            long_df["metric_name"].unique().tolist() if "metric_name" in long_df.columns else []
+        )
         ts_range = ""
         if "timestamp_utc" in long_df.columns:
             t = long_df["timestamp_utc"].dropna()
@@ -98,8 +107,8 @@ def generate_processing_report(
         lines.append("|-----------|------------|-----------------|")
         for _, row in exclusion_log.iterrows():
             lines.append(
-                f"| {row.get('subject_id','')} | {row.get('event_type','')} "
-                f"| {row.get('n_rows_excluded','')} |"
+                f"| {row.get('subject_id', '')} | {row.get('event_type', '')} "
+                f"| {row.get('n_rows_excluded', '')} |"
             )
         lines.append("")
 
@@ -115,9 +124,9 @@ def generate_processing_report(
             if not invalid.empty:
                 for _, row in invalid.iterrows():
                     lines.append(
-                        f"  - Subject '{row.get('subject_id','')}', "
-                        f"metric '{row.get('metric_name','')}': "
-                        f"coverage={row.get('baseline_coverage','?')}"
+                        f"  - Subject '{row.get('subject_id', '')}', "
+                        f"metric '{row.get('metric_name', '')}': "
+                        f"coverage={row.get('baseline_coverage', '?')}"
                     )
     else:
         lines.append("- Baseline not computed.")
@@ -141,9 +150,9 @@ def generate_processing_report(
     bsl = analysis_config.get("baseline", {})
     lines += [
         f"- Timezone: `{analysis_config.get('timezone', 'unknown')}`",
-        f"- Light cycle: {ld.get('light_on','?')} → {ld.get('light_off','?')}",
-        f"- Alignment event: `{aln.get('event_type','none')}`  scope=`{aln.get('scope','?')}`",
-        f"- Baseline window: {bsl.get('start_hours','?')}h → {bsl.get('end_hours','?')}h",
+        f"- Light cycle: {ld.get('light_on', '?')} → {ld.get('light_off', '?')}",
+        f"- Alignment event: `{aln.get('event_type', 'none')}`  scope=`{aln.get('scope', '?')}`",
+        f"- Baseline window: {bsl.get('start_hours', '?')}h → {bsl.get('end_hours', '?')}h",
         f"- Aggregation bin: {analysis_config.get('aggregation_bin_seconds', 'native')} s",
         "",
     ]
@@ -192,9 +201,9 @@ def generate_metadata_validation_report(
                 subject_meta[col] = "N/A"
         for _, row in subject_meta.iterrows():
             lines.append(
-                f"| {row.get('subject_id','')} "
-                f"| {row.get('metadata_quality_score','?')} "
-                f"| {row.get('metadata_complete','?')} |"
+                f"| {row.get('subject_id', '')} "
+                f"| {row.get('metadata_quality_score', '?')} "
+                f"| {row.get('metadata_complete', '?')} |"
             )
         lines.append("")
 

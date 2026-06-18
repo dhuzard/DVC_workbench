@@ -10,6 +10,12 @@ from __future__ import annotations
 import pandas as pd
 from zoneinfo import ZoneInfo
 
+__all__ = [
+    "localise_timestamps",
+    "annotate_light_dark",
+    "add_light_dark_columns",
+]
+
 
 def _parse_time_str(t: str) -> tuple[int, int]:
     """Parse 'HH:MM' → (hour, minute)."""
