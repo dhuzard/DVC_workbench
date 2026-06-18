@@ -28,6 +28,7 @@ from dvc_behavior.analysis import (
 # Fixtures / builders
 # ---------------------------------------------------------------------------
 
+
 def _cosine_df(
     amplitude: float = 3.0,
     mesor: float = 10.0,
@@ -92,6 +93,7 @@ def _flat_noise_df(seed: int = 1) -> pd.DataFrame:
 # 1. Cosinor rhythmicity test + CIs
 # ---------------------------------------------------------------------------
 
+
 def test_cosinor_recovers_known_params_and_detects_rhythm():
     df = _cosine_df(amplitude=3.0, mesor=10.0, acrophase_zt=14.0, noise_sd=0.1)
 
@@ -135,6 +137,7 @@ def test_cosinor_binned_matches_legacy_point_estimates():
 # 2. Configurable photoperiod
 # ---------------------------------------------------------------------------
 
+
 def test_photoperiod_labels_flip_for_8_vs_16():
     # Acrophase around ZT10: light under 16:8, dark under 8:16.
     df = _cosine_df(acrophase_zt=10.0, noise_sd=0.05)
@@ -150,6 +153,7 @@ def test_photoperiod_labels_flip_for_8_vs_16():
 # ---------------------------------------------------------------------------
 # 3. Estimation-first stats
 # ---------------------------------------------------------------------------
+
 
 def _two_group_df(shift: float = 5.0) -> pd.DataFrame:
     rng = np.random.default_rng(7)
@@ -229,6 +233,7 @@ def test_estimation_large_n_not_flagged():
 # 4. Non-parametric circadian metrics
 # ---------------------------------------------------------------------------
 
+
 def test_nonparametric_circadian_clean_rhythm_high_is_and_ra():
     df = _cosine_df(amplitude=5.0, mesor=10.0, acrophase_zt=14.0, noise_sd=0.05, n_days=5)
 
@@ -281,6 +286,7 @@ def test_nonparametric_circadian_warns_without_timestamp():
 # 5. Activity bouts / fragmentation
 # ---------------------------------------------------------------------------
 
+
 def test_activity_bouts_known_on_off_pattern():
     # 4h on, 4h off, repeated -> with median threshold, each "on" block is a bout.
     start = pd.Timestamp("2024-01-01T00:00:00")
@@ -325,6 +331,7 @@ def test_activity_bouts_warns_without_timestamp():
 # ---------------------------------------------------------------------------
 # 6. Window-summary contrast
 # ---------------------------------------------------------------------------
+
 
 def _window_df() -> pd.DataFrame:
     rng = np.random.default_rng(11)
@@ -371,6 +378,7 @@ def test_window_contrast_auc_statistic_runs():
 # ---------------------------------------------------------------------------
 # 7. Period estimation
 # ---------------------------------------------------------------------------
+
 
 def test_estimate_period_recovers_24h():
     df = _cosine_df(amplitude=4.0, acrophase_zt=12.0, noise_sd=0.1, n_subjects=2, n_days=6)

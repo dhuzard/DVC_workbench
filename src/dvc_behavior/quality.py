@@ -5,6 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+__all__ = [
+    "QUALITY_REPORT_COLUMNS",
+    "build_quality_report",
+    "compute_quality_report",
+    "summarize_quality",
+]
+
 
 QUALITY_REPORT_COLUMNS = [
     "subject_id",
@@ -72,7 +79,9 @@ def build_quality_report(
                 "missing_value_count": int(values.isna().sum()),
                 "missing_value_rate": float(values.isna().mean()) if len(values) else np.nan,
                 "missing_timestamp_count": int(timestamps.isna().sum()),
-                "duplicate_timestamp_count": int(timestamps.dropna().duplicated(keep="first").sum()),
+                "duplicate_timestamp_count": int(
+                    timestamps.dropna().duplicated(keep="first").sum()
+                ),
                 "median_interval_seconds": median_interval,
                 "max_gap_seconds": max_gap,
                 "long_gap_threshold_seconds": gap_threshold,

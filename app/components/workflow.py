@@ -139,19 +139,39 @@ OUTPUT_COLUMN_GLOSSARY = [
     ("is_dark", "Boolean marker for rows inside the dark phase.", "Light/dark"),
     ("is_excluded", "Boolean marker for rows excluded by event windows.", "Exclusions"),
     ("exclusion_reason", "Event/window rule that excluded the row.", "Exclusions"),
-    ("flag_reason", "Event/window rule that flagged the row without necessarily excluding it.", "Exclusions"),
+    (
+        "flag_reason",
+        "Event/window rule that flagged the row without necessarily excluding it.",
+        "Exclusions",
+    ),
     ("alignment_event_type", "Event type used as the relative-time anchor.", "Alignment"),
     ("alignment_timestamp", "Timestamp of the alignment anchor used for the row.", "Alignment"),
     ("time_from_event_seconds", "Seconds from the configured alignment anchor.", "Alignment"),
     ("time_from_event_hours", "Hours from the configured alignment anchor.", "Alignment"),
     ("experimental_day", "Integer day relative to the configured alignment label.", "Alignment"),
-    ("baseline_value", "Subject/metric baseline value computed from the baseline window.", "Baseline"),
+    (
+        "baseline_value",
+        "Subject/metric baseline value computed from the baseline window.",
+        "Baseline",
+    ),
     ("baseline_valid", "Whether the baseline met the configured coverage requirement.", "Baseline"),
-    ("baseline_coverage", "Fraction of expected baseline bins present for subject/metric.", "Baseline"),
+    (
+        "baseline_coverage",
+        "Fraction of expected baseline bins present for subject/metric.",
+        "Baseline",
+    ),
     ("baseline_corrected_value", "Raw value minus baseline value.", "Baseline"),
     ("baseline_percent_change", "Percent change from baseline value.", "Baseline"),
-    ("baseline_percent_change_unstable", "True when the baseline magnitude is below the near-zero floor, so percent change is left blank to avoid blow-up.", "Baseline"),
-    ("metadata_complete", "Whether key subject metadata fields are sufficiently complete.", "Metadata"),
+    (
+        "baseline_percent_change_unstable",
+        "True when the baseline magnitude is below the near-zero floor, so percent change is left blank to avoid blow-up.",
+        "Baseline",
+    ),
+    (
+        "metadata_complete",
+        "Whether key subject metadata fields are sufficiently complete.",
+        "Metadata",
+    ),
     ("metadata_warning", "Metadata completeness warning for the subject row.", "Metadata"),
     ("metadata_quality_score", "Fraction of key subject metadata fields filled.", "Metadata"),
     ("group_label", "Human-readable group label from group metadata.", "Metadata"),
@@ -289,9 +309,15 @@ def render_output_glossary(active_columns: Iterable[str] | None = None) -> None:
         width="stretch",
         hide_index=True,
         column_config={
-            "column": st.column_config.TextColumn("Output column", help="Column name in processed exports."),
-            "stage": st.column_config.TextColumn("Stage", help="Workflow stage that creates or uses the field."),
-            "present": st.column_config.TextColumn("Current output", help="Whether the current processed table includes the field."),
+            "column": st.column_config.TextColumn(
+                "Output column", help="Column name in processed exports."
+            ),
+            "stage": st.column_config.TextColumn(
+                "Stage", help="Workflow stage that creates or uses the field."
+            ),
+            "present": st.column_config.TextColumn(
+                "Current output", help="Whether the current processed table includes the field."
+            ),
             "meaning": st.column_config.TextColumn("Meaning", help="Plain-language definition."),
         },
     )

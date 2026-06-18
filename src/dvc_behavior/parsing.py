@@ -19,10 +19,25 @@ import pandas as pd
 
 from .config import GROUP_META_SUFFIXES
 
+__all__ = [
+    "detect_group_prefixes",
+    "get_group_meta_col_names",
+    "get_subject_columns",
+    "extract_subject_id",
+    "parse_timestamp_series",
+    "to_utc",
+    "detect_native_bin_seconds",
+    "infer_metric_name",
+    "wide_to_long",
+    "load_metric_csv",
+    "combine_long_dfs",
+]
+
 
 # ---------------------------------------------------------------------------
 # Group / column detection
 # ---------------------------------------------------------------------------
+
 
 def detect_group_prefixes(columns: list[str]) -> list[str]:
     """Return group prefixes inferred from columns ending with _TIMESTAMP."""
@@ -51,13 +66,14 @@ def extract_subject_id(col: str, group_prefix: str) -> str:
     """
     sep = group_prefix + "_"
     if col.startswith(sep):
-        return col[len(sep):]
+        return col[len(sep) :]
     return col
 
 
 # ---------------------------------------------------------------------------
 # Timestamp parsing
 # ---------------------------------------------------------------------------
+
 
 def parse_timestamp_series(series: pd.Series) -> pd.Series:
     """Parse a series of timestamp strings into timezone-aware pd.Timestamps."""
@@ -91,6 +107,7 @@ def detect_native_bin_seconds(ts_series: pd.Series) -> tuple[float | None, bool]
 # Metric name inference
 # ---------------------------------------------------------------------------
 
+
 def infer_metric_name(source_file: str) -> str:
     stem = Path(source_file).stem
     for suffix in ("_loc__index_smoothed", "_loc_index_smoothed", "_index_smoothed", "_smoothed"):
@@ -102,6 +119,7 @@ def infer_metric_name(source_file: str) -> str:
 # ---------------------------------------------------------------------------
 # Core conversion: wide → long
 # ---------------------------------------------------------------------------
+
 
 def wide_to_long(
     df: pd.DataFrame,
@@ -123,9 +141,7 @@ def wide_to_long(
     warns: list[str] = []
 
     if not prefixes:
-        warns.append(
-            f"{source_file}: no *_TIMESTAMP column found — cannot detect group blocks."
-        )
+        warns.append(f"{source_file}: no *_TIMESTAMP column found — cannot detect group blocks.")
         return pd.DataFrame(), warns
 
     all_rows: list[dict[str, Any]] = []
@@ -141,8 +157,10 @@ def wide_to_long(
             warns.append(f"{source_file}: group '{prefix}' has no individual subject columns.")
 
         # Parse timestamps for this group
-        raw_ts = parse_timestamp_series(df[ts_col]) if ts_col in df.columns else pd.Series(
-            [pd.NaT] * len(df), index=df.index
+        raw_ts = (
+            parse_timestamp_series(df[ts_col])
+            if ts_col in df.columns
+            else pd.Series([pd.NaT] * len(df), index=df.index)
         )
 
         native_bin, irregular = detect_native_bin_seconds(raw_ts)
@@ -153,17 +171,23 @@ def wide_to_long(
             )
 
         # Pre-extract scalar series for speed
-        avg_s = df[avg_col].astype(float, errors="ignore") if avg_col in df.columns else pd.Series(
-            np.nan, index=df.index
+        avg_s = (
+            df[avg_col].astype(float, errors="ignore")
+            if avg_col in df.columns
+            else pd.Series(np.nan, index=df.index)
         )
-        sem_s = df[sem_col].astype(float, errors="ignore") if sem_col in df.columns else pd.Series(
-            np.nan, index=df.index
+        sem_s = (
+            df[sem_col].astype(float, errors="ignore")
+            if sem_col in df.columns
+            else pd.Series(np.nan, index=df.index)
         )
-        samples_s = df[samples_col] if samples_col in df.columns else pd.Series(
-            np.nan, index=df.index
+        samples_s = (
+            df[samples_col] if samples_col in df.columns else pd.Series(np.nan, index=df.index)
         )
-        rel_s = pd.to_numeric(df["relativeTime"], errors="coerce") if "relativeTime" in df.columns else pd.Series(
-            np.nan, index=df.index
+        rel_s = (
+            pd.to_numeric(df["relativeTime"], errors="coerce")
+            if "relativeTime" in df.columns
+            else pd.Series(np.nan, index=df.index)
         )
 
         for subject_col in subject_cols:
@@ -204,6 +228,7 @@ def wide_to_long(
 # ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
+
 
 def load_metric_csv(
     source: Any,

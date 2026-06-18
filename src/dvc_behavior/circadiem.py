@@ -186,9 +186,7 @@ class CircadiemConfig:
     def __post_init__(self) -> None:
         self.base_url = (self.base_url or "").strip().rstrip("/")
         if self.vcg_band not in VCG_BANDS:
-            raise CircadiemError(
-                f"vcg_band must be one of {VCG_BANDS}, got {self.vcg_band!r}."
-            )
+            raise CircadiemError(f"vcg_band must be one of {VCG_BANDS}, got {self.vcg_band!r}.")
 
     def url(self, path: str) -> str:
         if not self.base_url:
@@ -441,8 +439,7 @@ def get_prompt(config: CircadiemConfig) -> str:
         raise
     except Exception as exc:  # noqa: BLE001
         raise CircadiemError(
-            f"Could not fetch the Circadiem prompt from {config.base_url}. "
-            f"Original error: {exc}"
+            f"Could not fetch the Circadiem prompt from {config.base_url}. Original error: {exc}"
         ) from exc
     return str(body.get("prompt", "")) if isinstance(body, dict) else ""
 

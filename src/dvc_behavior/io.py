@@ -8,6 +8,11 @@ from typing import Any
 
 import pandas as pd
 
+__all__ = [
+    "read_csv_flexible",
+    "list_example_files",
+]
+
 
 def read_csv_flexible(source: Any, **kwargs: Any) -> pd.DataFrame:
     """

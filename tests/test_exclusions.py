@@ -28,14 +28,22 @@ def _make_long_df_utc(n_rows=100, start="2024-01-01T07:00:00+0100", bin_min=60):
 
 
 def _make_event_df_utc(ts_str: str, subject: str, event_type: str = "REMOVED") -> pd.DataFrame:
-    return _make_event_rows_df_utc([{
-        "group": "C57",
-        "day": 0, "hour": 0, "minute": 0, "relativeTime": 0,
-        "timestamp": ts_str,
-        "cage": subject,
-        "rack": "R1", "position": "A1",
-        "event": event_type,
-    }])
+    return _make_event_rows_df_utc(
+        [
+            {
+                "group": "C57",
+                "day": 0,
+                "hour": 0,
+                "minute": 0,
+                "relativeTime": 0,
+                "timestamp": ts_str,
+                "cage": subject,
+                "rack": "R1",
+                "position": "A1",
+                "event": event_type,
+            }
+        ]
+    )
 
 
 def _make_event_rows_df_utc(rows: list[dict]) -> pd.DataFrame:
@@ -86,18 +94,26 @@ class TestComputeExclusionWindows:
             [
                 {
                     "group": "C57",
-                    "day": 0, "hour": 0, "minute": 0, "relativeTime": 0,
+                    "day": 0,
+                    "hour": 0,
+                    "minute": 0,
+                    "relativeTime": 0,
                     "timestamp": "2024-01-05T10:00:00+0100",
                     "cage": "C57_1",
-                    "rack": "R1", "position": "A1",
+                    "rack": "R1",
+                    "position": "A1",
                     "event": "REMOVED",
                 },
                 {
                     "group": "C57",
-                    "day": 0, "hour": 3, "minute": 0, "relativeTime": 10800,
+                    "day": 0,
+                    "hour": 3,
+                    "minute": 0,
+                    "relativeTime": 10800,
                     "timestamp": "2024-01-05T13:00:00+0100",
                     "cage": "C57_1",
-                    "rack": "R1", "position": "A1",
+                    "rack": "R1",
+                    "position": "A1",
                     "event": "INSERTED",
                 },
             ]
@@ -185,17 +201,21 @@ class TestApplyExclusions:
         long = _make_long_df_utc(n_rows=50, bin_min=60)
         # Event for a cage not in the long_df (triggers group fallback)
         first_ts = long["timestamp_utc"].dropna().min()
-        win_df = pd.DataFrame([{
-            "subject_id": "NONEXISTENT_CAGE",
-            "group_id": "C57",
-            "event_type": "REMOVED",
-            "event_timestamp": first_ts,
-            "exclusion_start": first_ts - pd.Timedelta(hours=24),
-            "exclusion_end": first_ts + pd.Timedelta(hours=24),
-            "exclusion_reason": "REMOVED",
-            "exclude": True,
-            "flag": True,
-        }])
+        win_df = pd.DataFrame(
+            [
+                {
+                    "subject_id": "NONEXISTENT_CAGE",
+                    "group_id": "C57",
+                    "event_type": "REMOVED",
+                    "event_timestamp": first_ts,
+                    "exclusion_start": first_ts - pd.Timedelta(hours=24),
+                    "exclusion_end": first_ts + pd.Timedelta(hours=24),
+                    "exclusion_reason": "REMOVED",
+                    "exclude": True,
+                    "flag": True,
+                }
+            ]
+        )
         result, _ = apply_exclusions(long, win_df)
         # Fallback to group → all C57 subjects excluded in window
         excl = result[result["is_excluded"]]

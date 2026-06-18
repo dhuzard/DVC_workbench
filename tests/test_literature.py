@@ -163,6 +163,4 @@ class TestEuropePMCProvider:
         monkeypatch.setattr(lit, "_http_get_json", boom)
         provider = lit.EuropePMCProvider()
         with pytest.raises(RuntimeError):
-            lit.find_supporting_literature(
-                {"tables": {"circadian_summary": {}}}, provider
-            )
+            lit.find_supporting_literature({"tables": {"circadian_summary": {}}}, provider)

@@ -13,6 +13,12 @@ import pandas as pd
 
 from .config import EVENT_CATEGORY_MAP
 
+__all__ = [
+    "parse_event_csv",
+    "combine_event_dfs",
+    "get_unique_event_types",
+]
+
 
 _EVENT_COLS_REQUIRED = {"group", "timestamp", "event"}
 _EVENT_COLS_OPTIONAL = {"day", "hour", "minute", "relativeTime", "cage", "rack", "position"}
@@ -70,8 +76,10 @@ def parse_event_csv(
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=False, errors="coerce")
 
     df["timestamp_utc"] = df["timestamp"].apply(
-        lambda t: t.tz_convert("UTC") if t is not pd.NaT and t.tzinfo is not None else (
-            t.tz_localize("UTC") if t is not pd.NaT else pd.NaT
+        lambda t: (
+            t.tz_convert("UTC")
+            if t is not pd.NaT and t.tzinfo is not None
+            else (t.tz_localize("UTC") if t is not pd.NaT else pd.NaT)
         )
     )
     df["timestamp_local"] = df["timestamp"]  # re-localised with user TZ later
@@ -81,7 +89,9 @@ def parse_event_csv(
     )
 
     rack_col = df["rack"].astype(str) if "rack" in df.columns else pd.Series(pd.NA, index=df.index)
-    pos_col = df["position"].astype(str) if "position" in df.columns else pd.Series(pd.NA, index=df.index)
+    pos_col = (
+        df["position"].astype(str) if "position" in df.columns else pd.Series(pd.NA, index=df.index)
+    )
 
     n_bad = df["timestamp"].isna().sum()
     if n_bad:

@@ -111,7 +111,10 @@ class TestValidation:
     def test_resolve_api_key_from_env(self, monkeypatch):
         monkeypatch.setenv(circadiem.OPENAI_KEY_ENV, "sk-" + "z" * 30)
         assert circadiem.resolve_api_key().startswith("sk-")
-        assert circadiem.resolve_api_key("sk-explicitexplicitexplicit") == "sk-explicitexplicitexplicit"
+        assert (
+            circadiem.resolve_api_key("sk-explicitexplicitexplicit")
+            == "sk-explicitexplicitexplicit"
+        )
 
 
 class TestConfig:
@@ -141,7 +144,9 @@ class TestAnalyze:
 
         def fake_post(url, *, headers, files, data, timeout):
             captured.update(url=url, headers=headers, files=files, data=data, timeout=timeout)
-            return {"results": [good_result_row("A"), {"label": "B", "error": "bad image", "meta": {}}]}
+            return {
+                "results": [good_result_row("A"), {"label": "B", "error": "bad image", "meta": {}}]
+            }
 
         monkeypatch.setattr(circadiem, "_http_post_multipart", fake_post)
         rows = circadiem.analyze(
@@ -160,7 +165,9 @@ class TestAnalyze:
         assert isinstance(rows[1], circadiem.ErrorRow)
 
     def test_rejects_bad_key_before_calling(self, monkeypatch):
-        monkeypatch.setattr(circadiem, "_http_post_multipart", lambda *a, **k: pytest.fail("called"))
+        monkeypatch.setattr(
+            circadiem, "_http_post_multipart", lambda *a, **k: pytest.fail("called")
+        )
         with pytest.raises(circadiem.CircadiemError):
             circadiem.analyze([("a.png", make_png())], config=self._config(), api_key="nope")
 
@@ -187,12 +194,16 @@ class TestAnalyze:
 
         monkeypatch.setattr(circadiem, "_http_post_multipart", boom)
         with pytest.raises(circadiem.CircadiemError, match="Could not reach Circadiem"):
-            circadiem.analyze([("a.png", make_png())], config=self._config(), api_key="sk-" + "k" * 30)
+            circadiem.analyze(
+                [("a.png", make_png())], config=self._config(), api_key="sk-" + "k" * 30
+            )
 
     def test_missing_results_array_raises(self, monkeypatch):
         monkeypatch.setattr(circadiem, "_http_post_multipart", lambda *a, **k: {"oops": 1})
         with pytest.raises(circadiem.CircadiemError, match="results"):
-            circadiem.analyze([("a.png", make_png())], config=self._config(), api_key="sk-" + "k" * 30)
+            circadiem.analyze(
+                [("a.png", make_png())], config=self._config(), api_key="sk-" + "k" * 30
+            )
 
 
 class TestHealthAndPrompt:
@@ -209,7 +220,9 @@ class TestHealthAndPrompt:
 
     def test_get_prompt(self, monkeypatch):
         monkeypatch.setattr(circadiem, "_http_get_json", lambda url, **k: {"prompt": "rubric text"})
-        assert circadiem.get_prompt(circadiem.CircadiemConfig(base_url="https://h")) == "rubric text"
+        assert (
+            circadiem.get_prompt(circadiem.CircadiemConfig(base_url="https://h")) == "rubric text"
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -217,7 +217,9 @@ class TestComputeBaseline:
         assert bool(c57_1["baseline_imputed"].iloc[0]) is True
         assert bool(c57_1["baseline_valid"].iloc[0]) is True
         assert any("imputed" in warning for warning in warns)
-        assert bool(summary.loc[summary["subject_id"] == "C57_1", "baseline_imputed"].iloc[0]) is True
+        assert (
+            bool(summary.loc[summary["subject_id"] == "C57_1", "baseline_imputed"].iloc[0]) is True
+        )
 
     def test_manual_baseline_override_wins(self):
         long = _make_aligned_long(n_rows=200, bin_min=60, alignment_ts="2024-01-09T07:00:00+0100")

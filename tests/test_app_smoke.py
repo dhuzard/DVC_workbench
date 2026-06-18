@@ -112,11 +112,7 @@ def test_event_overlay_keeps_late_events_after_first_200():
         y_value=1.0,
     )
 
-    vlines = [
-        shape
-        for shape in fig.layout.shapes
-        if getattr(shape, "type", None) == "line"
-    ]
+    vlines = [shape for shape in fig.layout.shapes if getattr(shape, "type", None) == "line"]
     assert len(vlines) == 250
     assert vlines[-1].x0 == event_times[-1]
 
@@ -202,7 +198,9 @@ def test_circadian_profile_works_with_raw_processed_values():
         {
             "group_id": ["A", "A", "A", "A"],
             "subject_id": ["A1", "A1", "A2", "A2"],
-            "timestamp_local": pd.date_range("2025-01-01 07:00", periods=4, freq="6h", tz="Europe/Paris"),
+            "timestamp_local": pd.date_range(
+                "2025-01-01 07:00", periods=4, freq="6h", tz="Europe/Paris"
+            ),
             "zeitgeber_time_hours": [0.0, 6.0, 0.0, 6.0],
             "value": [1.0, 3.0, 2.0, 4.0],
         }
@@ -283,7 +281,9 @@ def test_analysis_time_and_auc_fallback_to_timestamps_without_alignment():
             "group_id": ["A", "A", "A"],
             "metric_name": ["activity"] * 3,
             "subject_id": ["A1"] * 3,
-            "timestamp_local": pd.date_range("2025-01-01 07:00", periods=3, freq="1h", tz="Europe/Paris"),
+            "timestamp_local": pd.date_range(
+                "2025-01-01 07:00", periods=3, freq="1h", tz="Europe/Paris"
+            ),
             "time_from_event_hours": [pd.NA, pd.NA, pd.NA],
             "value": [0.0, 1.0, 2.0],
             "is_excluded": [False, False, False],

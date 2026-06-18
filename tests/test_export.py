@@ -52,9 +52,14 @@ class TestBuildAnalysisConfig:
 
     def test_timestamp_is_utc_iso(self):
         cfg = build_analysis_config(
-            uploaded_files=[], study_metadata={}, timezone="UTC",
-            light_on="07:00", light_off="19:00",
-            alignment_cfg={}, exclusion_rules={}, baseline_cfg={},
+            uploaded_files=[],
+            study_metadata={},
+            timezone="UTC",
+            light_on="07:00",
+            light_off="19:00",
+            alignment_cfg={},
+            exclusion_rules={},
+            baseline_cfg={},
             aggregation_bin=None,
         )
         ts = cfg["processing_timestamp"]
@@ -67,9 +72,14 @@ class TestCreateExportZip:
     def _default_zip(self, processed=True):
         proc, summary = _build_sample_processed_df() if processed else (None, None)
         cfg = build_analysis_config(
-            uploaded_files=["f.csv"], study_metadata={}, timezone="Europe/Paris",
-            light_on="07:00", light_off="19:00",
-            alignment_cfg={}, exclusion_rules={}, baseline_cfg={},
+            uploaded_files=["f.csv"],
+            study_metadata={},
+            timezone="Europe/Paris",
+            light_on="07:00",
+            light_off="19:00",
+            alignment_cfg={},
+            exclusion_rules={},
+            baseline_cfg={},
             aggregation_bin=None,
         )
         report = generate_processing_report(
@@ -132,9 +142,14 @@ class TestCreateExportZip:
 
     def test_empty_processed_df_no_crash(self):
         cfg = build_analysis_config(
-            uploaded_files=[], study_metadata={}, timezone="UTC",
-            light_on="07:00", light_off="19:00",
-            alignment_cfg={}, exclusion_rules={}, baseline_cfg={},
+            uploaded_files=[],
+            study_metadata={},
+            timezone="UTC",
+            light_on="07:00",
+            light_off="19:00",
+            alignment_cfg={},
+            exclusion_rules={},
+            baseline_cfg={},
             aggregation_bin=None,
         )
         data = create_export_zip(
@@ -154,9 +169,14 @@ class TestCreateExportZip:
     def test_file_based_zip_builder(self, tmp_path):
         proc, summary = _build_sample_processed_df()
         cfg = build_analysis_config(
-            uploaded_files=["f.csv"], study_metadata={}, timezone="Europe/Paris",
-            light_on="07:00", light_off="19:00",
-            alignment_cfg={}, exclusion_rules={}, baseline_cfg={},
+            uploaded_files=["f.csv"],
+            study_metadata={},
+            timezone="Europe/Paris",
+            light_on="07:00",
+            light_off="19:00",
+            alignment_cfg={},
+            exclusion_rules={},
+            baseline_cfg={},
             aggregation_bin=None,
         )
         path = create_export_zip_file(
@@ -239,9 +259,14 @@ class TestGenerateProcessingReport:
     def test_returns_string(self):
         proc, summary = _build_sample_processed_df()
         cfg = build_analysis_config(
-            uploaded_files=["f.csv"], study_metadata={}, timezone="Europe/Paris",
-            light_on="07:00", light_off="19:00",
-            alignment_cfg={}, exclusion_rules={}, baseline_cfg={},
+            uploaded_files=["f.csv"],
+            study_metadata={},
+            timezone="Europe/Paris",
+            light_on="07:00",
+            light_off="19:00",
+            alignment_cfg={},
+            exclusion_rules={},
+            baseline_cfg={},
             aggregation_bin=None,
         )
         report = generate_processing_report(
@@ -259,9 +284,14 @@ class TestGenerateProcessingReport:
 
     def test_no_data_no_crash(self):
         cfg = build_analysis_config(
-            uploaded_files=[], study_metadata={}, timezone="UTC",
-            light_on="07:00", light_off="19:00",
-            alignment_cfg={}, exclusion_rules={}, baseline_cfg={},
+            uploaded_files=[],
+            study_metadata={},
+            timezone="UTC",
+            light_on="07:00",
+            light_off="19:00",
+            alignment_cfg={},
+            exclusion_rules={},
+            baseline_cfg={},
             aggregation_bin=None,
         )
         report = generate_processing_report(

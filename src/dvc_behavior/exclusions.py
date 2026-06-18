@@ -18,10 +18,17 @@ from typing import Any
 
 import pandas as pd
 
+__all__ = [
+    "compute_exclusion_windows",
+    "detect_cage_change_pairs",
+    "apply_exclusions",
+]
+
 
 # ---------------------------------------------------------------------------
 # Window computation
 # ---------------------------------------------------------------------------
+
 
 def compute_exclusion_windows(
     event_df: pd.DataFrame,
@@ -141,9 +148,17 @@ def compute_exclusion_windows(
 def _empty_window_df() -> pd.DataFrame:
     return pd.DataFrame(
         columns=[
-            "subject_id", "group_id", "event_scope", "event_type", "event_timestamp",
-            "paired_event_timestamp", "exclusion_start", "exclusion_end", "exclusion_reason",
-            "exclude", "flag",
+            "subject_id",
+            "group_id",
+            "event_scope",
+            "event_type",
+            "event_timestamp",
+            "paired_event_timestamp",
+            "exclusion_start",
+            "exclusion_end",
+            "exclusion_reason",
+            "exclude",
+            "flag",
         ]
     )
 
@@ -186,9 +201,8 @@ def _find_cage_change_pairs(
     event_df: pd.DataFrame,
     exclusion_rules: dict[str, dict[str, Any]],
 ) -> list[tuple[Any, Any]]:
-    if (
-        "CAGE_CHANGE" not in exclusion_rules
-        and ("REMOVED" not in exclusion_rules or "INSERTED" not in exclusion_rules)
+    if "CAGE_CHANGE" not in exclusion_rules and (
+        "REMOVED" not in exclusion_rules or "INSERTED" not in exclusion_rules
     ):
         return []
     if "event_type" not in event_df.columns:
@@ -281,8 +295,9 @@ def _same_cage_change_target(removed: pd.Series, inserted: pd.Series) -> bool:
 # Window merging (per subject)
 # ---------------------------------------------------------------------------
 
+
 def _merge_intervals(
-    intervals: list[tuple[pd.Timestamp, pd.Timestamp, str, bool, bool]]
+    intervals: list[tuple[pd.Timestamp, pd.Timestamp, str, bool, bool]],
 ) -> list[tuple[pd.Timestamp, pd.Timestamp, str, bool, bool]]:
     """
     Merge overlapping/adjacent intervals.
@@ -308,6 +323,7 @@ def _merge_intervals(
 # ---------------------------------------------------------------------------
 # Apply exclusions to long_df
 # ---------------------------------------------------------------------------
+
 
 def apply_exclusions(
     long_df: pd.DataFrame,

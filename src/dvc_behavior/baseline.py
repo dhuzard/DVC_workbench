@@ -10,6 +10,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+__all__ = [
+    "DEFAULT_BASELINE_EPSILON",
+    "compute_baseline",
+]
+
 # Minimum absolute baseline value for which a percent-change is considered
 # numerically stable. Light-phase locomotion baselines are frequently
 # near-zero; dividing by them makes ``baseline_percent_change`` explode to
@@ -61,7 +66,9 @@ def compute_baseline(
     warns: list[str] = []
     df = df.copy()
 
-    has_alignment = "time_from_event_hours" in df.columns and not df["time_from_event_hours"].isna().all()
+    has_alignment = (
+        "time_from_event_hours" in df.columns and not df["time_from_event_hours"].isna().all()
+    )
 
     if not has_alignment:
         warns.append(
@@ -134,10 +141,7 @@ def compute_baseline(
         else:
             coverage = np.nan
 
-        valid = (
-            n_bins > 0
-            and (np.isnan(coverage) or coverage >= min_coverage)
-        )
+        valid = n_bins > 0 and (np.isnan(coverage) or coverage >= min_coverage)
 
         if n_bins == 0:
             bval = np.nan

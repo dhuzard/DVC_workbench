@@ -1,5 +1,10 @@
 # DVC Behavioral Preprocessing Workbench
 
+[![CI](https://github.com/dhuzard/DVC_workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuzard/DVC_workbench/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![Code style: ruff](https://img.shields.io/badge/lint-ruff-261230.svg)](https://github.com/astral-sh/ruff)
+
 A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cage (DVC)** behavioral data exports, reviewing quality/confounds, and producing traceable outputs for exploratory analysis.
 
 > **Note:** DVC here means *Digital Ventilated Cage* (Tecniplast/TSE), **not** Data Version Control.
@@ -243,6 +248,24 @@ The **Analysis** page can turn the summary tables into readable, caveated prose 
 answer questions about your data. This layer is designed around the same
 local-first promise as the rest of the workbench.
 
+**Data egress at a glance.** Everything is **offline by default** — the table below is
+the complete list of optional features that can talk to the network, and each is
+**opt-in and off until you turn it on**. The model never sees your raw time series.
+
+| Feature | Default | What can leave your machine | Where it goes | Credential |
+|---------|---------|-----------------------------|---------------|------------|
+| Offline narrative | **On** | Nothing | — | None |
+| Ollama narrative / Q&A | Off | Aggregated summary tables only | Your **local** Ollama server | None |
+| Anthropic Claude narrative / Q&A | Off | Aggregated summary tables only | Anthropic API | Your `ANTHROPIC_API_KEY` (BYO) |
+| Europe PMC literature | Off | Generic topic **keywords** only (never data/group/file names) | Europe PMC API | None |
+| Circadiem circadian scoring | Off | A **rendered plot image** per group (no raw series) | A Circadiem service **you** deploy → OpenAI | `OPENAI_API_KEY`, forwarded per-request, never stored |
+
+> The Circadiem path is the heaviest disclosure: it transmits derived **plot images**
+> and forwards an `OPENAI_API_KEY` to a third-party service you operate, which in turn
+> calls OpenAI. Running Circadiem locally keeps the *service* local, but the OpenAI
+> vision call still egresses from it. See the [Circadiem](#ai-insights-optional) details
+> below before enabling it.
+
 **Plain-language narrative.** Pick an *Insight engine*:
 
 | Engine | What leaves your computer | Needs |
@@ -376,3 +399,22 @@ The v0.2 roadmap in `TODO.md` focuses on:
 - Expanding reusable data-quality diagnostics as new real-world failure modes appear
 - Keeping exploratory statistics clearly labelled with effect sizes and FDR correction
 - Strengthening smoke coverage around the app workflow
+
+---
+
+## Contributing
+
+Contributions are welcome! Please read [`CONTRIBUTING.md`](CONTRIBUTING.md) and
+[`AGENTS.md`](AGENTS.md) (the codebase conventions) before opening a pull request,
+and note our [Code of Conduct](CODE_OF_CONDUCT.md). Found a security or privacy
+issue? Please follow [`SECURITY.md`](SECURITY.md) rather than filing a public issue.
+
+## Citation
+
+If you use this workbench in your research, please cite it — see
+[`CITATION.cff`](CITATION.cff) or use GitHub's **"Cite this repository"** button.
+
+## License
+
+Released under the **GNU General Public License v3.0 or later** — see
+[`LICENSE`](LICENSE).

@@ -26,6 +26,7 @@ _EXAMPLES = Path(__file__).parent.parent / "data" / "examples"
 # Group prefix detection
 # ---------------------------------------------------------------------------
 
+
 class TestDetectGroupPrefixes:
     def test_single_group(self):
         cols = ["day", "hour", "C57_TIMESTAMP", "C57_AVG", "C57_SEM"]
@@ -58,6 +59,7 @@ class TestDetectGroupPrefixes:
 # Subject ID extraction
 # ---------------------------------------------------------------------------
 
+
 class TestExtractSubjectId:
     def test_simple(self):
         assert extract_subject_id("C57_C57_2", "C57") == "C57_2"
@@ -76,6 +78,7 @@ class TestExtractSubjectId:
 # ---------------------------------------------------------------------------
 # Native bin detection
 # ---------------------------------------------------------------------------
+
 
 class TestDetectNativeBin:
     def test_regular_1min(self):
@@ -113,6 +116,7 @@ class TestDetectNativeBin:
 # wide_to_long
 # ---------------------------------------------------------------------------
 
+
 class TestWideToLong:
     def test_basic_conversion(self):
         df = make_metric_df(n_rows=5, groups=["C57"], subjects_per_group=3)
@@ -125,10 +129,19 @@ class TestWideToLong:
         df = make_metric_df(n_rows=3)
         long, _ = wide_to_long(df, "f.csv")
         required = {
-            "source_file", "metric_name", "group_id", "subject_id",
-            "source_column", "timestamp", "timestamp_utc",
-            "value", "group_avg", "group_sem", "samples",
-            "native_bin_seconds", "is_group_average",
+            "source_file",
+            "metric_name",
+            "group_id",
+            "subject_id",
+            "source_column",
+            "timestamp",
+            "timestamp_utc",
+            "value",
+            "group_avg",
+            "group_sem",
+            "samples",
+            "native_bin_seconds",
+            "is_group_average",
         }
         assert required <= set(long.columns)
 
@@ -176,6 +189,7 @@ class TestWideToLong:
 # load_metric_csv
 # ---------------------------------------------------------------------------
 
+
 class TestLoadMetricCsv:
     def test_from_bytes(self):
         data = make_metric_csv_bytes(n_rows=5)
@@ -216,6 +230,7 @@ class TestLoadMetricCsv:
 # ---------------------------------------------------------------------------
 # combine_long_dfs
 # ---------------------------------------------------------------------------
+
 
 class TestCombineLongDfs:
     def test_empty_list(self):

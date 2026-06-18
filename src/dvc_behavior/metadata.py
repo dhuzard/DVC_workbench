@@ -15,6 +15,16 @@ from .config import (
     SUBJECT_METADATA_COLUMNS,
 )
 
+__all__ = [
+    "build_subject_metadata_template",
+    "build_group_metadata_template",
+    "build_study_metadata",
+    "validate_subject_metadata",
+    "compute_metadata_quality",
+    "merge_subject_metadata",
+    "merge_group_metadata",
+]
+
 # Proportion of important subject fields that must be filled for "complete" metadata
 _IMPORTANT_SUBJECT_FIELDS = [
     "animal_id",
@@ -29,6 +39,7 @@ _IMPORTANT_SUBJECT_FIELDS = [
 # ---------------------------------------------------------------------------
 # Subject metadata
 # ---------------------------------------------------------------------------
+
 
 def build_subject_metadata_template(long_df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -85,6 +96,7 @@ def build_study_metadata(overrides: dict[str, str] | None = None) -> dict[str, s
 # Metadata validation
 # ---------------------------------------------------------------------------
 
+
 def validate_subject_metadata(
     subject_meta: pd.DataFrame,
     long_df: pd.DataFrame,
@@ -108,15 +120,11 @@ def validate_subject_metadata(
 
     missing_from_meta = detected - meta_ids
     if missing_from_meta:
-        warnings.append(
-            f"These subjects have no metadata row: {sorted(missing_from_meta)}"
-        )
+        warnings.append(f"These subjects have no metadata row: {sorted(missing_from_meta)}")
 
     extra_in_meta = meta_ids - detected
     if extra_in_meta:
-        warnings.append(
-            f"Metadata contains subjects not found in data: {sorted(extra_in_meta)}"
-        )
+        warnings.append(f"Metadata contains subjects not found in data: {sorted(extra_in_meta)}")
 
     # Duplicate IDs
     dupes = subject_meta["subject_id"][subject_meta["subject_id"].duplicated()]
@@ -131,18 +139,22 @@ def compute_metadata_quality(row: pd.Series) -> tuple[bool, str, float]:
     Returns (metadata_complete, metadata_warning, metadata_quality_score).
     """
     filled = sum(
-        1 for f in _IMPORTANT_SUBJECT_FIELDS
+        1
+        for f in _IMPORTANT_SUBJECT_FIELDS
         if f in row.index and str(row[f]).strip() not in ("", "nan", "NaN", "None")
     )
     score = filled / len(_IMPORTANT_SUBJECT_FIELDS)
     complete = score >= 0.8
-    warning = "" if complete else f"Only {filled}/{len(_IMPORTANT_SUBJECT_FIELDS)} key fields filled"
+    warning = (
+        "" if complete else f"Only {filled}/{len(_IMPORTANT_SUBJECT_FIELDS)} key fields filled"
+    )
     return complete, warning, round(score, 2)
 
 
 # ---------------------------------------------------------------------------
 # Metadata merging into long_df
 # ---------------------------------------------------------------------------
+
 
 def merge_subject_metadata(
     long_df: pd.DataFrame,

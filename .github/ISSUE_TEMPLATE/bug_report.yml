@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a problem with the DVC Behavioral Preprocessing Workbench
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report!
+
+        ⚠️ **Do not attach real or sensitive behavioral data, API keys, or anything
+        you cannot share publicly.** If your report is security- or privacy-related,
+        please follow [SECURITY.md](../blob/main/SECURITY.md) instead of opening a
+        public issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: When I do X during the Y step, Z happens instead of...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Minimal steps to reproduce. If possible, include a *small, non-sensitive*
+        example CSV or describe its shape.
+      placeholder: |
+        1. Import ...
+        2. At the Baseline step, set ...
+        3. See error ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: Paste any error output. This will be automatically formatted as code.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: App version or git commit you are running.
+      placeholder: "0.1.0 or commit sha"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How are you running it?
+      options:
+        - Local Python (streamlit run)
+        - Docker / docker-compose
+        - Other (describe above)
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS & Python version
+      placeholder: "e.g. macOS 14 / Python 3.11"
+    validations:
+      required: false

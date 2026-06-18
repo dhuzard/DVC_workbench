@@ -14,6 +14,17 @@ import plotly.express as px
 import numpy as np
 import pandas as pd
 
+__all__ = [
+    "confidence_halfwidth",
+    "plot_raw_timeseries",
+    "plot_aligned_timeseries",
+    "plot_group_mean_timeseries",
+    "plot_baseline_quality_heatmap",
+    "detect_irregular_bins",
+    "plot_circadiem_vcg",
+    "figure_to_png_bytes",
+]
+
 
 _EXCLUSION_BAND_COLOR = "rgba(255, 100, 100, 0.18)"
 _DARK_PHASE_COLOR = "rgba(50, 50, 80, 0.12)"
@@ -42,10 +53,10 @@ def confidence_halfwidth(sd: float, n: float, level: float = 0.95) -> float:
     return crit * sem
 
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _get_exclusion_bands(
     df: pd.DataFrame,
@@ -91,6 +102,7 @@ def _add_exclusion_bands(fig: go.Figure, bands: list[dict]) -> None:
 # Raw timeseries by subject
 # ---------------------------------------------------------------------------
 
+
 def plot_raw_timeseries(
     df: pd.DataFrame,
     metric_name: str,
@@ -99,7 +111,9 @@ def plot_raw_timeseries(
     show_exclusions: bool = True,
 ) -> go.Figure:
     """Plot raw (unaligned) timeseries for selected subjects."""
-    sub_df = df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
+    sub_df = (
+        df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
+    )
 
     if subjects:
         sub_df = sub_df[sub_df["subject_id"].isin(subjects)]
@@ -142,6 +156,7 @@ def plot_raw_timeseries(
 # Aligned timeseries by subject
 # ---------------------------------------------------------------------------
 
+
 def plot_aligned_timeseries(
     df: pd.DataFrame,
     metric_name: str,
@@ -153,10 +168,17 @@ def plot_aligned_timeseries(
     baseline_end_h: float | None = None,
 ) -> go.Figure:
     """Plot timeseries aligned to event (x = time_from_event_hours)."""
-    sub_df = df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
+    sub_df = (
+        df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
+    )
 
-    if "time_from_event_hours" not in sub_df.columns or sub_df["time_from_event_hours"].isna().all():
-        return go.Figure(layout=dict(title="Alignment not applied — no time_from_event_hours column."))
+    if (
+        "time_from_event_hours" not in sub_df.columns
+        or sub_df["time_from_event_hours"].isna().all()
+    ):
+        return go.Figure(
+            layout=dict(title="Alignment not applied — no time_from_event_hours column.")
+        )
 
     if subjects:
         sub_df = sub_df[sub_df["subject_id"].isin(subjects)]
@@ -210,6 +232,7 @@ def plot_aligned_timeseries(
 # Group mean aligned timeseries
 # ---------------------------------------------------------------------------
 
+
 def plot_group_mean_timeseries(
     df: pd.DataFrame,
     metric_name: str,
@@ -226,9 +249,14 @@ def plot_group_mean_timeseries(
     present, so the band reflects between-animal variability rather than the
     number of raw bins. Time bins with fewer than ``min_n`` subjects are marked.
     """
-    sub_df = df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
+    sub_df = (
+        df[df["metric_name"] == metric_name].copy() if "metric_name" in df.columns else df.copy()
+    )
 
-    if "time_from_event_hours" not in sub_df.columns or sub_df["time_from_event_hours"].isna().all():
+    if (
+        "time_from_event_hours" not in sub_df.columns
+        or sub_df["time_from_event_hours"].isna().all()
+    ):
         return go.Figure(layout=dict(title="Alignment not applied."))
     if y_col not in sub_df.columns:
         return go.Figure(layout=dict(title=f"No data column: {y_col}"))
@@ -264,11 +292,7 @@ def plot_group_mean_timeseries(
     # band reflects between-animal variability rather than raw-bin count.
     has_subjects = "subject_id" in sub_df.columns
     if has_subjects:
-        unit = (
-            sub_df.groupby(["_t_bin", label_col, "subject_id"])[y_col]
-            .mean()
-            .reset_index()
-        )
+        unit = sub_df.groupby(["_t_bin", label_col, "subject_id"])[y_col].mean().reset_index()
     else:
         unit = sub_df[["_t_bin", label_col, y_col]].copy()
 
@@ -393,8 +417,13 @@ def detect_irregular_bins(
     if df is None or df.empty or not required <= set(df.columns):
         return pd.DataFrame(
             columns=[
-                "subject_id", "metric_name", "group_id", "median_interval_seconds",
-                "std_interval_seconds", "n_intervals", "irregular_bins",
+                "subject_id",
+                "metric_name",
+                "group_id",
+                "median_interval_seconds",
+                "std_interval_seconds",
+                "n_intervals",
+                "irregular_bins",
             ]
         )
 
@@ -498,11 +527,7 @@ def plot_circadiem_vcg(
 
     # Aggregate to the experimental unit (subject) before summarizing.
     if "subject_id" in data.columns:
-        unit = (
-            data.groupby(["_x_bin", "subject_id"], dropna=False)[value_col]
-            .mean()
-            .reset_index()
-        )
+        unit = data.groupby(["_x_bin", "subject_id"], dropna=False)[value_col].mean().reset_index()
     else:
         unit = data[["_x_bin", value_col]].copy()
 

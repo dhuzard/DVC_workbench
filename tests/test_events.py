@@ -24,9 +24,15 @@ class TestParseEventCsv:
         data = make_event_csv_bytes()
         ev, _ = parse_event_csv(io.BytesIO(data), "test_events.csv")
         required = {
-            "source_file", "group_id", "subject_id", "event_type",
-            "timestamp", "timestamp_utc", "timestamp_local",
-            "raw_event_label", "event_category",
+            "source_file",
+            "group_id",
+            "subject_id",
+            "event_type",
+            "timestamp",
+            "timestamp_utc",
+            "timestamp_local",
+            "raw_event_label",
+            "event_category",
         }
         assert required <= set(ev.columns)
 
@@ -81,13 +87,20 @@ class TestParseEventCsv:
         assert (ev[ev["event_type"] == "CAGE_ONLINE"]["event_category"] == "cage_status").all()
 
     def test_unknown_event_category_other(self):
-        events = [{
-            "group": "C57", "day": 0, "hour": 0, "minute": 0,
-            "relativeTime": 0,
-            "timestamp": "2024-01-01T07:00:00+0100",
-            "cage": "C57_1", "rack": "R1", "position": "A1",
-            "event": "WEIGH",
-        }]
+        events = [
+            {
+                "group": "C57",
+                "day": 0,
+                "hour": 0,
+                "minute": 0,
+                "relativeTime": 0,
+                "timestamp": "2024-01-01T07:00:00+0100",
+                "cage": "C57_1",
+                "rack": "R1",
+                "position": "A1",
+                "event": "WEIGH",
+            }
+        ]
         data = make_event_csv_bytes(events)
         ev, _ = parse_event_csv(io.BytesIO(data), "t.csv")
         assert ev["event_category"].iloc[0] == "other"

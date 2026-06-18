@@ -14,6 +14,11 @@ import pandas as pd
 
 from dvc_behavior import __version__
 
+__all__ = [
+    "MANIFEST_VERSION",
+    "build_provenance_manifest",
+]
+
 MANIFEST_VERSION = 1
 
 
