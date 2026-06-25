@@ -9,6 +9,8 @@ A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cag
 
 > DVC cages are designed and manufactured by Tecniplast S.p.A.
 
+> ⚠️ **Preliminary version — under active development and not fully validated.** This tool is a work in progress. All results should be independently double-checked before being used for analysis, reporting, or publication. We are actively looking for testers and feedback — please [open an issue](https://github.com/dhuzard/DVC_workbench/issues) to report bugs, problems, or suggestions.
+
 ---
 
 ## Quick start for beta testers (no coding needed)

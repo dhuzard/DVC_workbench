@@ -578,6 +578,18 @@ def _go_to_workflow_step(step_label: str) -> None:
     st.session_state.scroll_to_top = True
 
 
+def _render_preliminary_disclaimer() -> None:
+    """Show a prominent notice that the tool is a preliminary, unvalidated version."""
+    st.warning(
+        "**⚠️ Preliminary version — under active development and not fully validated.** "
+        "This tool is a work in progress. All results should be independently double-checked "
+        "before being used for analysis, reporting, or publication. "
+        "We are actively looking for testers and feedback — please report issues, bugs, and "
+        "suggestions so we can improve the tool.",
+        icon="⚠️",
+    )
+
+
 def _scroll_to_top_once() -> None:
     if not st.session_state.get("scroll_to_top", False):
         return
@@ -3413,6 +3425,7 @@ def main() -> None:
 
     st.title(cfg.APP_NAME)
     st.caption(f"v{cfg.APP_VERSION}  |  Digital Ventilated Cage behavioral data preprocessing")
+    _render_preliminary_disclaimer()
     _scroll_to_top_once()
 
     if selected_step.startswith("1."):
