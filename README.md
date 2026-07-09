@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/dvc-workbench-logo.png" alt="DVC Workbench logo" width="560">
+</p>
+
 # DVC Behavioral Preprocessing Workbench
 
 [![CI](https://github.com/dhuzard/DVC_workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/dhuzard/DVC_workbench/actions/workflows/ci.yml)
