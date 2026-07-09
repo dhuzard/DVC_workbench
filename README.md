@@ -13,6 +13,16 @@ A Python + Streamlit workbench for preprocessing binned **Digital Ventilated Cag
 
 ---
 
+## Setup demo for non-coders
+
+A 50-second walkthrough shows how to install Docker Desktop, download the ZIP, launch the workbench, and open the local app.
+
+[![Watch the DVC Workbench setup demo](docs/assets/dvc-workbench-setup-demo-thumbnail.jpg)](docs/assets/dvc-workbench-setup-demo.mp4)
+
+[Watch the MP4 directly](docs/assets/dvc-workbench-setup-demo.mp4)
+
+---
+
 ## Quick start for beta testers (no coding needed)
 
 > Your data **stays on your computer**. The app runs locally in a container — nothing is uploaded to a server.
