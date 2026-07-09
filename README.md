@@ -48,7 +48,7 @@ Open the unzipped folder, then:
 
 A black/white terminal window will open and show progress.
 
-- **First launch:** the launcher tries to **download a ready-made image** from GitHub Container Registry (typically under a minute on fast internet). If that succeeds, the app starts right away. If the pre-built image isn't available — for example, you're on an internal branch or behind a registry block — the launcher falls back to building the image locally (**5–15 minutes**, lots of scrolling text — that's normal).
+- **First launch:** the launcher tries to **download a ready-made image** from GitHub Container Registry (typically under a minute on fast internet). If that succeeds, the app starts right away. If the pre-built image isn't available — for example, you're on an internal branch or behind a registry block — the launcher falls back to building the image locally (**5–15 minutes**, lots of scrolling text — that's normal). On Windows, details from the failed pre-built-image pull are saved to a temporary log file before the local build starts.
 - **Subsequent launches:** a few seconds.
 
 When you see a line like `You can now view your Streamlit app in your browser` (or just `Uvicorn server started`), open your browser to:
@@ -74,6 +74,7 @@ To start it again later, repeat Step 3 — you're done with Steps 1 and 2 foreve
 |---|---|
 | `Docker is not installed` message in the terminal | You skipped Step 1. Install Docker Desktop and start it. |
 | `Docker Desktop is installed but not running` | Open Docker Desktop from your Start menu / Applications and wait for the whale icon to stop animating. |
+| `Pre-built image not available` | This is not fatal. The launcher will build the image locally instead; leave the terminal open until it finishes. |
 | Browser shows "This site can't be reached" at localhost:8501 | The image may still be building. Wait until the terminal says the server has started. |
 | Port 8501 is already in use | Another app is using that port. Stop it, or edit `docker-compose.yml` and change `"8501:8501"` to e.g. `"8601:8501"`, then open `http://localhost:8601`. |
 | macOS says `"run.sh" cannot be opened because it is from an unidentified developer` | Right-click the file → *Open* → click *Open* in the dialog. Only needed once. |
