@@ -37,8 +37,36 @@ You only need to do **Step 1 once**. After that, opening the app is two clicks.
 
 Docker is the program that runs the workbench in a sandbox. It's free.
 
+#### Windows only — install WSL 2 first
+
+Docker Desktop uses **Windows Subsystem for Linux 2 (WSL 2)**. On Windows 11 or
+Windows 10 version 2004 (build 19041) or later:
+
+1. Open the **Start** menu, search for **PowerShell**, right-click it, and choose
+   **Run as administrator**. Select **Yes** if Windows asks whether to allow the
+   app to make changes to your computer.
+2. Run:
+
+   ```powershell
+   wsl --install
+   ```
+
+3. Follow the on-screen instructions and accept any confirmation prompts for the
+   new installation.
+4. When Windows asks you to restart, save your work and **restart your computer**.
+   If no restart prompt appears, restart after the command finishes.
+5. After restarting, Ubuntu may open and ask you to create a Linux username and
+   password. Complete those prompts, then close the window.
+
+If WSL is already installed, the command will tell you. You can update it from an
+administrator PowerShell window with `wsl --update`. For older Windows versions or
+installation problems, follow Microsoft's
+[official WSL installation guide](https://learn.microsoft.com/windows/wsl/install).
+
+Then install Docker Desktop:
+
 1. Go to <https://www.docker.com/products/docker-desktop/> and download Docker Desktop for your operating system.
-   - **Windows:** pick the Windows installer. If asked, choose the **WSL 2** option (the installer will guide you).
+   - **Windows:** pick the Windows installer. If asked, choose the **WSL 2** option.
    - **macOS:** choose the installer that matches your chip — **Apple Silicon** (M1/M2/M3/M4) or **Intel**. If you're not sure, click the Apple menu → *About This Mac* and check "Chip" or "Processor".
    - **Linux:** install Docker Engine via your package manager (see Docker's docs).
 2. Open the installer and accept the defaults.
